@@ -6,11 +6,17 @@ import org.bouncycastle.crypto.params.HKDFParameters;
 
 import javax.crypto.KeyAgreement;
 import javax.crypto.spec.DHParameterSpec;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.spec.ECGenParameterSpec;
 import java.util.Arrays;
 import java.util.Base64;
+
+
+
 
 public class Main {
     public static void main(String[] args) {
@@ -86,7 +92,6 @@ public class Main {
         }
     }
 }
-
 
 
 class DiffieHellmanExample {
