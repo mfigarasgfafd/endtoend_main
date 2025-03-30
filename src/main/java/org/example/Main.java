@@ -21,75 +21,6 @@ import java.util.Base64;
 public class Main {
     public static void main(String[] args) {
 
-        System.out.println("--- Diffie-Hellman Key Exchange ---");
-        DiffieHellmanExample dhExample = new DiffieHellmanExample();
-        dhExample.performKeyExchange();
-
-        System.out.println("\n--- Elliptic Curve Diffie-Hellman Key Exchange ---");
-        ECDiffieHellmanExample ecDhExample = new ECDiffieHellmanExample();
-        ecDhExample.performKeyExchange();
-
-
-
-        System.out.println("\n--- Manual Elliptic Curve Diffie-Hellman Key Exchange ---");
-        try {
-            ManualECDiffieHellman alice = new ManualECDiffieHellman();
-            ManualECDiffieHellman bob = new ManualECDiffieHellman();
-
-            // Generate private keys
-            BigInteger alicePrivate = alice.generatePrivateKey();
-            BigInteger bobPrivate = bob.generatePrivateKey();
-
-            // Generate public keys
-            ManualECDiffieHellman.ECPoint alicePublic = alice.generatePublicKey(alicePrivate);
-            ManualECDiffieHellman.ECPoint bobPublic = bob.generatePublicKey(bobPrivate);
-
-            // Compute shared secrets
-            byte[] aliceShared = alice.computeSharedSecret(alicePrivate, bobPublic);
-            byte[] bobShared = bob.computeSharedSecret(bobPrivate, alicePublic);
-
-            // Verify
-            if (Arrays.equals(aliceShared, bobShared)) {
-                System.out.println("Key exchange successful!");
-            } else {
-                System.out.println("Key exchange failed!");
-            }
-
-        } catch (InvalidKeyException e) {
-            System.err.println("Key exchange failed: " + e.getMessage());
-        }
-
-
-        System.out.println("\n--- Manual Diffie-Hellman Key Exchange ---");
-
-        try {
-            // Create instances for Alice and Bob
-            ManualDiffieHellman alice = new ManualDiffieHellman();
-            ManualDiffieHellman bob = new ManualDiffieHellman();
-
-            // Generate private keys
-            BigInteger alicePrivate = alice.generatePrivateKey();
-            BigInteger bobPrivate = bob.generatePrivateKey();
-
-            // Generate public keys
-            BigInteger alicePublic = alice.generatePublicKey(alicePrivate);
-            BigInteger bobPublic = bob.generatePublicKey(bobPrivate);
-
-            // Compute shared secrets
-            byte[] aliceShared = alice.computeSharedSecret(alicePrivate, bobPublic);
-            byte[] bobShared = bob.computeSharedSecret(bobPrivate, alicePublic);
-
-
-            // demonstration:
-            if (Arrays.equals(aliceShared, bobShared)) {
-                System.out.println("Key exchange successful!");
-            } else {
-                System.out.println("Key exchange failed!");
-            }
-
-        } catch (InvalidKeyException e) {
-            System.err.println("Key exchange failed: " + e.getMessage());
-        }
     }
 }
 
@@ -180,6 +111,7 @@ class ManualDiffieHellman {
     private static final BigInteger TWO = BigInteger.valueOf(2);
 
     private final SecureRandom secureRandom;
+    private byte[] sharedSecret;
 
     public ManualDiffieHellman() {
         this.secureRandom = new SecureRandom();
@@ -239,6 +171,14 @@ class ManualDiffieHellman {
             throw new RuntimeException("Key derivation failed", e);
         }
     }
+
+    public byte[] getSharedSecret() {
+        return new byte[0];
+    }
+
+    public void setSharedSecret(byte[] sharedSecret) {
+        this.sharedSecret = sharedSecret;
+    }
 }
 
 class ManualECDiffieHellman {
@@ -257,6 +197,38 @@ class ManualECDiffieHellman {
     public ManualECDiffieHellman() {
         this.secureRandom = new SecureRandom();
     }
+
+    // Add state fields
+    private BigInteger privateKey;
+    private ECPoint publicKey;
+    private byte[] sharedSecret;
+
+    public void generateKeyPair() throws InvalidKeyException {
+        this.privateKey = generatePrivateKey();
+        this.publicKey = generatePublicKey(privateKey);
+    }
+
+    public ECPoint getPublicKey() {
+        return publicKey;
+    }
+
+    public void computeSharedSecret(ECPoint otherPublicKey) throws InvalidKeyException {
+        if (!isPointOnCurve(otherPublicKey)) {
+            throw new InvalidKeyException("Public key point is not on the curve");
+        }
+
+        ECPoint sharedPoint = multiplyPoint(otherPublicKey, privateKey);
+        if (sharedPoint.infinity) {
+            throw new InvalidKeyException("Invalid shared point at infinity");
+        }
+
+        this.sharedSecret = deriveKey(sharedPoint.x.toByteArray());
+    }
+
+    public byte[] getSharedSecret() {
+        return sharedSecret;
+    }
+
 
     static class ECPoint {
         final BigInteger x;
@@ -351,12 +323,22 @@ class ManualECDiffieHellman {
 
     private boolean isPointOnCurve(ECPoint point) {
         if (point.infinity) return false;
+        if (point.x == null || point.y == null) return false;
 
-        // y² = x³ + ax + b
-        BigInteger left = point.y.pow(2).mod(P);
-        BigInteger right = point.x.pow(3).add(A.multiply(point.x)).add(B).mod(P);
-        return left.equals(right);
+        try {
+            // Verify using modular arithmetic
+            BigInteger ySquared = point.y.modPow(TWO, P);
+            BigInteger xCubed = point.x.modPow(THREE, P);
+            BigInteger aX = A.multiply(point.x).mod(P);
+            BigInteger right = xCubed.add(aX).add(B).mod(P);
+
+            return ySquared.equals(right);
+        } catch (NullPointerException e) {
+            return false;
+        }
     }
+    private static final BigInteger TWO = BigInteger.valueOf(2);
+    private static final BigInteger THREE = BigInteger.valueOf(3);
 
     private byte[] deriveKey(byte[] sharedSecret) {
         try {
