@@ -26,6 +26,8 @@ public class Main {
 
 
 class DiffieHellmanExample {
+    private byte[] sharedSecret;
+
     public void performKeyExchange() {
         try {
             BigInteger p = new BigInteger("FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E08" +
@@ -33,42 +35,56 @@ class DiffieHellmanExample {
                     "3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A63A36210000000000090563", 16);
             BigInteger g = BigInteger.valueOf(2);
 
-            KeyPairGenerator aliceKeyPairGen = KeyPairGenerator.getInstance("DiffieHellman");
+            // Use the same parameters for both parties
             DHParameterSpec dhSpec = new DHParameterSpec(p, g);
-            aliceKeyPairGen.initialize(dhSpec);
-            KeyPair aliceKeyPair = aliceKeyPairGen.generateKeyPair();
 
-            KeyPairGenerator bobKeyPairGen = KeyPairGenerator.getInstance("DiffieHellman");
-            bobKeyPairGen.initialize(dhSpec);
-            KeyPair bobKeyPair = bobKeyPairGen.generateKeyPair();
+            // Generate Alice's key pair
+            KeyPairGenerator aliceKpg = KeyPairGenerator.getInstance("DiffieHellman");
+            aliceKpg.initialize(dhSpec);
+            KeyPair aliceKp = aliceKpg.generateKeyPair();
 
-            KeyAgreement aliceKeyAgree = KeyAgreement.getInstance("DiffieHellman");
-            aliceKeyAgree.init(aliceKeyPair.getPrivate());
+            // Generate Bob's key pair
+            KeyPairGenerator bobKpg = KeyPairGenerator.getInstance("DiffieHellman");
+            bobKpg.initialize(dhSpec);
+            KeyPair bobKp = bobKpg.generateKeyPair();
 
-            KeyAgreement bobKeyAgree = KeyAgreement.getInstance("DiffieHellman");
-            bobKeyAgree.init(bobKeyPair.getPrivate());
+            // Alice's agreement
+            KeyAgreement aliceAgree = KeyAgreement.getInstance("DiffieHellman");
+            aliceAgree.init(aliceKp.getPrivate());
+            aliceAgree.doPhase(bobKp.getPublic(), true);
 
-            aliceKeyAgree.doPhase(bobKeyPair.getPublic(), true);
-            bobKeyAgree.doPhase(aliceKeyPair.getPublic(), true);
+            // Bob's agreement
+            KeyAgreement bobAgree = KeyAgreement.getInstance("DiffieHellman");
+            bobAgree.init(bobKp.getPrivate());
+            bobAgree.doPhase(aliceKp.getPublic(), true);
 
-            byte[] aliceSharedSecret = aliceKeyAgree.generateSecret();
-            byte[] bobSharedSecret = bobKeyAgree.generateSecret();
+            // Generate and verify secrets
+            byte[] aliceSecret = aliceAgree.generateSecret();
+            byte[] bobSecret = bobAgree.generateSecret();
 
-            System.out.println("Alice's Shared Secret: " + Base64.getEncoder().encodeToString(aliceSharedSecret));
-            System.out.println("Bob's Shared Secret: " + Base64.getEncoder().encodeToString(bobSharedSecret));
-
-            if (MessageDigest.isEqual(aliceSharedSecret, bobSharedSecret)) {
-                System.out.println("Shared secrets match!");
-            } else {
-                System.out.println("Shared secrets do not match.");
+            if (!MessageDigest.isEqual(aliceSecret, bobSecret)) {
+                throw new RuntimeException("DH secrets don't match");
             }
+
+            // Store the verified secret
+            this.sharedSecret = aliceSecret;
+
         } catch (Exception e) {
-            e.printStackTrace();
+            throw new RuntimeException("DH exchange failed", e);
         }
+    }
+
+    public byte[] getSharedSecret() {
+        if (sharedSecret == null) {
+            throw new IllegalStateException("Perform key exchange first");
+        }
+        return sharedSecret;
     }
 }
 
 class ECDiffieHellmanExample {
+    private byte[] sharedSecret;
+
     public void performKeyExchange() {
         try {
             KeyPairGenerator aliceKeyPairGen = KeyPairGenerator.getInstance("EC");
@@ -85,23 +101,17 @@ class ECDiffieHellmanExample {
             KeyAgreement bobKeyAgree = KeyAgreement.getInstance("ECDH");
             bobKeyAgree.init(bobKeyPair.getPrivate());
 
+            // Complete both phases
             aliceKeyAgree.doPhase(bobKeyPair.getPublic(), true);
             bobKeyAgree.doPhase(aliceKeyPair.getPublic(), true);
 
-            byte[] aliceSharedSecret = aliceKeyAgree.generateSecret();
-            byte[] bobSharedSecret = bobKeyAgree.generateSecret();
-
-            System.out.println("Alice's Shared Secret: " + Base64.getEncoder().encodeToString(aliceSharedSecret));
-            System.out.println("Bob's Shared Secret: " + Base64.getEncoder().encodeToString(bobSharedSecret));
-
-            if (MessageDigest.isEqual(aliceSharedSecret, bobSharedSecret)) {
-                System.out.println("Shared secrets match!");
-            } else {
-                System.out.println("Shared secrets do not match.");
-            }
+            this.sharedSecret = aliceKeyAgree.generateSecret();
         } catch (Exception e) {
-            e.printStackTrace();
+            throw new RuntimeException("ECDH failed", e);
         }
+    }
+    public byte[] getSharedSecret() {
+        return sharedSecret;
     }
 }
 

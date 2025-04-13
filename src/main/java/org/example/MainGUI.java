@@ -11,16 +11,25 @@ import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.stage.Stage;
+import org.bouncycastle.crypto.digests.SHA256Digest;
+import org.bouncycastle.crypto.generators.HKDFBytesGenerator;
+import org.bouncycastle.crypto.params.HKDFParameters;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
+import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 public class MainGUI extends Application {
@@ -28,6 +37,10 @@ public class MainGUI extends Application {
     private ManualDiffieHellman manualDhBob;
     private ManualECDiffieHellman alice;
     private ManualECDiffieHellman bob;
+
+    private DiffieHellmanExample dhExample;
+    private ECDiffieHellmanExample ecDhExample;
+    private ManualECDiffieHellman manualEcdhAlice;
 
     private ListView<String> chatList;
     private TextField messageInput;
@@ -42,7 +55,7 @@ public class MainGUI extends Application {
 
     @Override
     public void start(Stage primaryStage) {
-        primaryStage.setTitle("SecureChat");
+        primaryStage.setTitle("endtoend chat");
 
         // Initialize chat messages list first
         chatMessages = FXCollections.observableArrayList();
@@ -184,79 +197,79 @@ public class MainGUI extends Application {
 
 
     private void startKeyExchange() {
+        String algorithm = algorithmChoice.getValue();
+
+        // Wrap UI updates in Platform.runLater
+        Platform.runLater(() -> chatMessages.clear());
+
         new Thread(() -> {
-            String algorithm = algorithmChoice.getValue();
-            switch (algorithm) {
-                case "Diffie-Hellman":
-                    new DiffieHellmanExample().performKeyExchange();
-                    break;
-                case "ECDH":
-                    new ECDiffieHellmanExample().performKeyExchange();
-                    break;
-                case "Manual DH":
-                    runManualDH();
-                    break;
-                case "Manual ECDH":
-                    runManualECDH();
-                    break;
+            try {
+//            chatMessages.clear();
+                switch (algorithm) {
+                    case "Diffie-Hellman":
+                        dhExample = new DiffieHellmanExample();
+                        dhExample.performKeyExchange();
+                        Platform.runLater(() ->
+                                addMessageToChat("DH Key Exchange Completed", false));
+                        break;
+                    case "ECDH":
+                        ecDhExample = new ECDiffieHellmanExample();
+                        ecDhExample.performKeyExchange();
+                        Platform.runLater(() ->
+                                addMessageToChat("ECDH Key Exchange Completed", false));
+                        break;
+                    case "Manual DH":
+                        runManualDH();
+                        break;
+                    case "Manual ECDH":
+                        runManualECDH();
+                        break;
+                }
+            }catch(Exception e) {
+                Platform.runLater(() ->
+                        addMessageToChat("Error: " + e.getMessage(), false));
             }
+
         }).start();
     }
 
     private void runManualDH() {
         try {
-            System.out.println("\n--- Manual Diffie-Hellman Key Exchange ---");
-            ManualDiffieHellman alice = new ManualDiffieHellman();
+            manualDhAlice = new ManualDiffieHellman();
             ManualDiffieHellman bob = new ManualDiffieHellman();
-            BigInteger alicePrivate = alice.generatePrivateKey();
+
+            BigInteger alicePrivate = manualDhAlice.generatePrivateKey();
             BigInteger bobPrivate = bob.generatePrivateKey();
-            BigInteger alicePublic = alice.generatePublicKey(alicePrivate);
+
+            BigInteger alicePublic = manualDhAlice.generatePublicKey(alicePrivate);
             BigInteger bobPublic = bob.generatePublicKey(bobPrivate);
-            byte[] aliceShared = alice.computeSharedSecret(alicePrivate, bobPublic);
+
+            byte[] aliceShared = manualDhAlice.computeSharedSecret(alicePrivate, bobPublic);
             byte[] bobShared = bob.computeSharedSecret(bobPrivate, alicePublic);
+
             manualDhAlice.setSharedSecret(aliceShared);
-            manualDhBob.setSharedSecret(bobShared);
-            System.out.println("Alice's Shared Secret: " + Base64.getEncoder().encodeToString(aliceShared));
-            System.out.println("Bob's Shared Secret: " + Base64.getEncoder().encodeToString(bobShared));
-            if (Arrays.equals(aliceShared, bobShared)) {
-                System.out.println("Key exchange successful!");
-            } else {
-                System.out.println("Key exchange failed!");
-            }
-        } catch (InvalidKeyException ex) {
-            System.err.println("Key exchange failed: " + ex.getMessage());
+
+            addMessageToChat("Manual DH Successful!", false);
+        } catch (Exception e) {
+            addMessageToChat("Manual DH Failed: " + e.getMessage(), false);
         }
     }
 
     private void runManualECDH() {
         try {
-            System.out.println("\n--- Manual Elliptic Curve Diffie-Hellman Key Exchange ---");
-            addMessageToChat("Starting Manual ECDH Key Exchange...", false);
+            manualEcdhAlice = new ManualECDiffieHellman();
+            ManualECDiffieHellman bob = new ManualECDiffieHellman();
 
-            alice = new ManualECDiffieHellman();
-            bob = new ManualECDiffieHellman();
-
-            // Generate key pairs
-            alice.generateKeyPair();
+            manualEcdhAlice.generateKeyPair();
             bob.generateKeyPair();
 
-            // Compute shared secrets
-            alice.computeSharedSecret(bob.getPublicKey());
-            bob.computeSharedSecret(alice.getPublicKey());
+            manualEcdhAlice.computeSharedSecret(bob.getPublicKey());
+            bob.computeSharedSecret(manualEcdhAlice.getPublicKey());
 
-            System.out.println("Alice's Shared Secret: " + Base64.getEncoder().encodeToString(alice.getSharedSecret()));
-            System.out.println("Bob's Shared Secret: " + Base64.getEncoder().encodeToString(bob.getSharedSecret()));
-
-            if (Arrays.equals(alice.getSharedSecret(), bob.getSharedSecret())) {
-                addMessageToChat("Key exchange successful!", false);
-            } else {
-                addMessageToChat("Key exchange failed!", false);
-            }
-        } catch (InvalidKeyException ex) {
-            addMessageToChat("Key exchange failed: " + ex.getMessage(), false);
+            addMessageToChat("Manual ECDH Successful!", false);
+        } catch (Exception e) {
+            addMessageToChat("Manual ECDH Failed: " + e.getMessage(), false);
         }
-
-
     }
 
 
@@ -271,19 +284,29 @@ public class MainGUI extends Application {
                 String algorithm = algorithmChoice.getValue();
 
                 switch (algorithm) {
+                    case "Diffie-Hellman":
+                        if (dhExample != null) {
+                            sharedSecret = dhExample.getSharedSecret();
+                        }
+                        break;
+
+                    case "ECDH":
+                        if (ecDhExample != null) {
+                            sharedSecret = ecDhExample.getSharedSecret();
+                        }
+                        break;
+
                     case "Manual DH":
                         if (manualDhAlice != null) {
                             sharedSecret = manualDhAlice.getSharedSecret();
                         }
                         break;
+
                     case "Manual ECDH":
-                        if (alice != null) {
-                            sharedSecret = alice.getSharedSecret();
+                        if (manualEcdhAlice != null) {
+                            sharedSecret = manualEcdhAlice.getSharedSecret();
                         }
                         break;
-                    default:
-                        System.err.println("Algorithm not implemented for encryption.");
-                        return;
                 }
 
                 if (sharedSecret == null) {
@@ -294,42 +317,74 @@ public class MainGUI extends Application {
                 // Derive AES key from the PRE-COMPUTED shared secret
                 SecretKey aesKey = deriveAESKey(sharedSecret);
 
-                // Encrypt the message
-                byte[] encryptedMessage = encryptMessage(message, aesKey);
+                // Encrypt and display
+                byte[] encrypted = encryptMessage(message, aesKey);
+                String encryptedB64 = Base64.getEncoder().encodeToString(encrypted);
+                addMessageToChat("Encrypted: " + encryptedB64, false);
 
-                // Display encrypted message
-                String encryptedMessageBase64 = Base64.getEncoder().encodeToString(encryptedMessage);
-                System.out.println("Encrypted Message: " + encryptedMessageBase64);
-                addMessageToChat("Encrypted: " + encryptedMessageBase64, false);
 
-                // Decrypt message (simulate Alice's side)
-                String decryptedMessage = new String(decryptMessage(encryptedMessage, aesKey));
-                System.out.println("Decrypted Message (Alice received): " + decryptedMessage);
-                addMessageToChat("Decrypted (Alice): " + decryptedMessage, false);
-
+                // Decrypt and display
+                String decrypted = decryptMessage(encrypted, aesKey);
+                addMessageToChat("Decrypted: " + decrypted, false);
 
                 messageInput.clear();
             } catch (Exception e) {
-                System.err.println("Failed to send message: " + e.getMessage());
+                addMessageToChat("Error: " + e.getMessage(), false);
             }
         }
     }
 
-    private SecretKey deriveAESKey(byte[] sharedSecret) throws Exception {
-        // Simple derivation of AES key (for demonstration purposes), use something else in practice
-        byte[] derivedKeyBytes = Arrays.copyOf(sharedSecret, 16); // 128-bit AES
-        return new SecretKeySpec(derivedKeyBytes, "AES");
+    private SecretKey deriveAESKey(byte[] sharedSecret) {
+        try {
+            HKDFBytesGenerator hkdf = new HKDFBytesGenerator(new SHA256Digest());
+            hkdf.init(new HKDFParameters(sharedSecret, null, null));
+
+            byte[] aesKeyBytes = new byte[32]; // 256-bit key
+            hkdf.generateBytes(aesKeyBytes, 0, aesKeyBytes.length);
+
+            return new SecretKeySpec(aesKeyBytes, "AES");
+        } catch (Exception e) {
+            throw new RuntimeException("Key derivation failed", e);
+        }
     }
 
-    private byte[] encryptMessage(String message, SecretKey aesKey) throws Exception {
-        Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-        cipher.init(Cipher.ENCRYPT_MODE, aesKey);
-        return cipher.doFinal(message.getBytes());
+    private static final int GCM_IV_LENGTH = 12; // 96 bits for GCM
+    private static final int GCM_TAG_LENGTH = 16 * 8; // 128-bit authentication tag
+
+    private byte[] encryptMessage(String message, SecretKey key) throws GeneralSecurityException {
+        byte[] iv = new byte[GCM_IV_LENGTH];
+        SecureRandom random = new SecureRandom();
+        random.nextBytes(iv);
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+        cipher.init(Cipher.ENCRYPT_MODE, key, spec);
+
+        byte[] ciphertext = cipher.doFinal(message.getBytes(StandardCharsets.UTF_8));
+
+        // Combine IV + ciphertext
+        ByteBuffer byteBuffer = ByteBuffer.allocate(iv.length + ciphertext.length);
+        byteBuffer.put(iv);
+        byteBuffer.put(ciphertext);
+        return byteBuffer.array();
     }
 
-    private byte[] decryptMessage(byte[] encryptedMessage, SecretKey aesKey) throws Exception {
-        Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-        cipher.init(Cipher.DECRYPT_MODE, aesKey);
-        return cipher.doFinal(encryptedMessage);
+    private String decryptMessage(byte[] encrypted, SecretKey key) throws GeneralSecurityException {
+        ByteBuffer byteBuffer = ByteBuffer.wrap(encrypted);
+
+        byte[] iv = new byte[GCM_IV_LENGTH];
+        byteBuffer.get(iv);
+
+        byte[] ciphertext = new byte[byteBuffer.remaining()];
+        byteBuffer.get(ciphertext);
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+        cipher.init(Cipher.DECRYPT_MODE, key, spec);
+
+        byte[] decrypted = cipher.doFinal(ciphertext);
+        return new String(decrypted, StandardCharsets.UTF_8);
     }
+
+
 }
