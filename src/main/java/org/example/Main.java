@@ -232,6 +232,7 @@ class ManualECDiffieHellman {
             throw new InvalidKeyException("Invalid shared point at infinity");
         }
 
+        assert sharedPoint.x != null;
         this.sharedSecret = deriveKey(sharedPoint.x.toByteArray());
     }
 
@@ -286,6 +287,7 @@ class ManualECDiffieHellman {
             throw new InvalidKeyException("Invalid shared point at infinity");
         }
 
+        assert sharedPoint.x != null;
         return deriveKey(sharedPoint.x.toByteArray());
     }
 
@@ -306,7 +308,9 @@ class ManualECDiffieHellman {
             }
         } else {
             // Point addition
+            assert p2.y != null;
             BigInteger numerator = p2.y.subtract(p1.y);
+            assert p2.x != null;
             BigInteger denominator = p2.x.subtract(p1.x);
             slope = numerator.multiply(denominator.modInverse(P)).mod(P);
         }
