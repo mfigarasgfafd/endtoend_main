@@ -3,29 +3,13 @@ package org.example;
 import java.security.KeyPair;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
-import org.bouncycastle.crypto.digests.SHA256Digest;
-import org.bouncycastle.crypto.generators.HKDFBytesGenerator;
-import org.bouncycastle.crypto.params.HKDFParameters;
 import javax.crypto.KeyAgreement;
-import javax.crypto.spec.DHParameterSpec;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PrintStream;
-import java.math.BigInteger;
 import java.security.*;
 import java.security.spec.ECGenParameterSpec;
-import java.util.Arrays;
-import java.util.Base64;
 
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
-import org.springframework.boot.web.client.RestTemplateBuilder;
-import org.springframework.context.annotation.Bean;
 
-import java.security.KeyPair;
 import java.security.PublicKey;
-import java.util.Base64;
-
 
 
 public class ChatClient {
@@ -58,33 +42,44 @@ public class ChatClient {
     }
 
     public void sendMessage(String recipientUsername, String message) {
-        // Get recipient's public key
-        User recipient = webClient.get()
-                .uri("/api/users?username={username}", recipientUsername)
-                .retrieve()
-                .bodyToMono(User.class)
-                .block();
+        try {
+            // Get recipient's public key
+            User recipient = webClient.get()
+                    .uri("/api/users?username={username}", recipientUsername)
+                    .retrieve()
+                    .bodyToMono(User.class)
+                    .block();
 
-        // Perform DH key exchange
-        byte[] sharedSecret = computeSharedSecret(
-                recipient.getPublicKey(),
-                this.keyExchangeAlgorithm
-        );
+            if (recipient == null) {
+                System.err.println("Recipient not found: " + recipientUsername);
+                return;
+            }
 
-        // Encrypt message
-        CipherResult encrypted = encryptMessage(message, sharedSecret);
+            // Perform key exchange
+            byte[] sharedSecret = computeSharedSecret(
+                    recipient.getPublicKey(),
+                    this.keyExchangeAlgorithm
+            );
 
-        // Send to backend
-        webClient.post()
-                .uri("/api/messages")
-                .bodyValue(new MessageRequest(
-                        recipient.getUserId(),
-                        encrypted.ciphertext(),
-                        encrypted.iv()
-                ))
-                .retrieve()
-                .bodyToMono(Void.class)
-                .block();
+            // Encrypt message
+            CipherResult encrypted = encryptMessage(message, sharedSecret);
+
+            // Send to backend - convert UUID to String
+            webClient.post()
+                    .uri("/api/messages")
+                    .bodyValue(new MessageRequest(
+                            this.localUser.getUserId().toString(),  // Convert UUID to String
+                            recipient.getUserId().toString(),       // Convert UUID to String
+                            encrypted.ciphertext(),
+                            encrypted.iv()
+                    ))
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .block();
+
+        } catch (Exception e) {
+            System.err.println("Message send failed: " + e.getMessage());
+        }
     }
     private KeyPair generateKeyPair(String algorithm) {
         try {

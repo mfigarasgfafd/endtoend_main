@@ -19,10 +19,17 @@ public class User {
     @Column(nullable = false)
     private String publicKey;
 
+    @Transient // This field won't be persisted
+    private String password;
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+
     private LocalDateTime createdAt;
     private LocalDateTime lastSeen;
 
-
+    public String getUserIdString() {
+        return userId != null ? userId.toString() : "";
+    }
     public UUID getUserId() {
         return userId;
     }

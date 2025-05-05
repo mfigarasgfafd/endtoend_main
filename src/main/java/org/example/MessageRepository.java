@@ -6,6 +6,6 @@ import java.util.List;
 import java.util.UUID;
 
 public interface MessageRepository extends JpaRepository<Message, UUID> {
-    List<Message> findByReceiverAndDeliveredFalse(User receiver);
-    List<Message> findByReceiverAndReadFalse(User receiver);
+    // Always work with String usernames here
+    List<Message> findByRecipientUsernameAndDeliveredFalse(String recipientUsername);
 }

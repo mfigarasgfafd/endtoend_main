@@ -10,46 +10,50 @@ import java.util.UUID;
 @Entity
 @Table(name = "messages")
 public class Message {
-    @Id
-    @GeneratedValue
-    private UUID messageId;
+    @Id @GeneratedValue
+    private UUID id;
 
-    @ManyToOne
-    @JoinColumn(name = "sender_id")
-    private User sender;
-
-    @ManyToOne
-    @JoinColumn(name = "receiver_id")
-    private User receiver;
-
-    @Lob
+    // Store only the usernames
     @Column(nullable = false)
+    private String senderUsername;
+
+    @Column(nullable = false)
+    private String recipientUsername;
+
+    @Column(length = 4096, nullable = false)
     private String ciphertext;
 
+    @Column(length = 256, nullable = false)
+    private String iv;
+
     @Column(nullable = false)
-    private String iv; // Base64 encoded
+    private boolean delivered = false;
 
-    private LocalDateTime timestamp;
-    private boolean delivered;
-    private boolean read;
+    @Column(nullable = false)
+    private LocalDateTime timestamp = LocalDateTime.now();
 
-    // Getters, setters, constructors
-
-
-    public User getSender() {
-        return sender;
+    public UUID getId() {
+        return id;
     }
 
-    public void setSender(User sender) {
-        this.sender = sender;
+    public void setId(UUID id) {
+        this.id = id;
     }
 
-    public User getReceiver() {
-        return receiver;
+    public String getSenderUsername() {
+        return senderUsername;
     }
 
-    public void setReceiver(User receiver) {
-        this.receiver = receiver;
+    public void setSenderUsername(String senderUsername) {
+        this.senderUsername = senderUsername;
+    }
+
+    public String getRecipientUsername() {
+        return recipientUsername;
+    }
+
+    public void setRecipientUsername(String recipientUsername) {
+        this.recipientUsername = recipientUsername;
     }
 
     public String getCiphertext() {
@@ -68,14 +72,6 @@ public class Message {
         this.iv = iv;
     }
 
-    public LocalDateTime getTimestamp() {
-        return timestamp;
-    }
-
-    public void setTimestamp(LocalDateTime timestamp) {
-        this.timestamp = timestamp;
-    }
-
     public boolean isDelivered() {
         return delivered;
     }
@@ -84,19 +80,11 @@ public class Message {
         this.delivered = delivered;
     }
 
-    public boolean isRead() {
-        return read;
+    public LocalDateTime getTimestamp() {
+        return timestamp;
     }
 
-    public void setRead(boolean read) {
-        this.read = read;
-    }
-
-    public UUID getMessageId() {
-        return messageId;
-    }
-
-    public void setMessageId(UUID messageId) {
-        this.messageId = messageId;
+    public void setTimestamp(LocalDateTime timestamp) {
+        this.timestamp = timestamp;
     }
 }

@@ -1,9 +1,8 @@
 package org.example;
 
-import java.util.UUID;
-
 public record MessageRequest(
-        UUID receiverId,
+        String sender,
+        String recipient,
         String ciphertext,
         String iv
 ) {}
