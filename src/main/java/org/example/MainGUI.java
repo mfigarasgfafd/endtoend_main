@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +48,9 @@ import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import reactor.core.publisher.Mono;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static ch.qos.logback.core.encoder.ByteArrayUtil.hexStringToByteArray;
+
 public class MainGUI extends Application {
     private ManualDiffieHellman manualDhAlice;
     private ManualDiffieHellman manualDhBob;
@@ -290,7 +294,7 @@ public class MainGUI extends Application {
                     case "DH":
                         performDhWithLibrary(contact); break;
                     case "Manual ECDH":
-                        performManualEcdh(contact); break;
+                        performManualECDH(contact); break;
                     case "ECDH":
                         performEcdhWithLibrary(contact); break;
                     default:
@@ -308,44 +312,46 @@ public class MainGUI extends Application {
     }
 
 
-
-    private void performManualEcdh(String contact) throws Exception {
-        ManualECDiffieHellman me = manualEcdhInstances.computeIfAbsent(contact, c -> {
+    private void performManualECDH(String contact) throws Exception {
+        // Generate or reuse ManualECDiffieHellman
+        ManualECDiffieHellman ecdh = manualEcdhInstances.computeIfAbsent(contact, c -> {
+            ManualECDiffieHellman inst = new ManualECDiffieHellman();
             try {
-                ManualECDiffieHellman inst = new ManualECDiffieHellman();
                 inst.generateKeyPair();
+                // Publish pubkey
                 webClient.put()
-                        .uri(b -> b.path("/api/users/{u}/public-key").build(currentUser))
+                        .uri("/api/users/{u}/public-key", currentUser)
                         .bodyValue(inst.getPublicKey())
                         .retrieve().toBodilessEntity().block();
                 return inst;
-            } catch (Exception ex) {
-                throw new RuntimeException(ex);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         });
 
-        String partner = pollForKey(contact);
-        // parse “x,y”
-        String[] parts = partner.split(",");
-        ManualECDiffieHellman.ECPoint pPoint =
-                new ManualECDiffieHellman.ECPoint(new BigInteger(parts[0]), new BigInteger(parts[1]));
-
-        me.computeSharedSecret(pPoint);
-        sharedSecrets.put(contact, deriveAESKey(me.getSharedSecret()));
+        // Fetch partner pubkey
+        String pk = pollForPublicKey(contact);
+        // Expect hex uncompressed: 04||X||Y
+        byte[] raw = hexStringToByteArray(pk);
+        if (raw.length != 65 || raw[0] != 0x04) throw new InvalidKeyException("Invalid public key format");
+        BigInteger x = new BigInteger(1, Arrays.copyOfRange(raw, 1, 33));
+        BigInteger y = new BigInteger(1, Arrays.copyOfRange(raw, 33, 65));
+        // Compute shared secret
+        ecdh.computeSharedSecret(new ManualECDiffieHellman.ECPointAffine(x, y));
+        byte[] secret = ecdh.getSharedSecret();
+        SecretKey aes = new SecretKeySpec(secret, 0, 16, "AES");
+        sharedSecrets.put(contact, aes);
     }
-
-
-    private ManualECDiffieHellman.ECPoint parseECPoint(String keyStr) throws NumberFormatException {
-        String[] parts = keyStr.split(",");
-        if (parts.length != 2) {
-            throw new IllegalArgumentException("Invalid public key format");
+    private String pollForPublicKey(String contact) throws InterruptedException {
+        for (int i = 0; i < 20; i++) {
+            String val = webClient.get()
+                    .uri("/api/users/{u}/public-key", contact)
+                    .retrieve().bodyToMono(String.class).block();
+            if (val != null && !val.isBlank()) return val;
+            Thread.sleep(300);
         }
-        return new ManualECDiffieHellman.ECPoint(
-                new BigInteger(parts[0]),
-                new BigInteger(parts[1])
-        );
+        throw new RuntimeException("Timed out waiting for " + contact + " public key");
     }
-
 
     private void performManualDh(String contact) throws Exception {
         // 1) If this is the first click for this contact, generate + upload your public key
@@ -500,80 +506,7 @@ public class MainGUI extends Application {
         });
     }
 
-    private void runManualDH(String contact) {
-        try {
-            // Initialize current user's DH parameters
-            ManualDiffieHellman manualDH = new ManualDiffieHellman();
-            manualDH.initialize();
 
-            // Send our public key to server
-            webClient.put()
-                    .uri("/api/users/{username}/public-key", currentUser)
-                    .bodyValue(manualDH.getPublicKey())
-                    .retrieve()
-                    .toBodilessEntity()
-                    .block();
-
-            // Get partner's public key from server
-            String partnerKeyStr = webClient.get()
-                    .uri("/api/users/{username}/public-key", contact)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
-
-            // Convert partner's public key string to BigInteger
-            BigInteger partnerPublicKey = new BigInteger(partnerKeyStr);
-
-            // Compute shared secret
-            manualDH.computeSharedSecret(partnerPublicKey);
-
-            // Derive AES key and store it
-            SecretKey aesKey = deriveAESKey(manualDH.getSharedSecret());
-            sharedSecrets.put(contact, aesKey);
-
-            Platform.runLater(() ->
-                    updateChatHistory(contact, "Manual DH key exchange successful!", false));
-
-        } catch (NumberFormatException e) {
-            Platform.runLater(() ->
-                    updateChatHistory(contact, "Invalid public key format from partner", false));
-        } catch (Exception e) {
-            Platform.runLater(() ->
-                    updateChatHistory(contact, "Manual DH failed: " + e.getMessage(), false));
-        }
-    }
-
-    private void runManualECDH(String contact) {
-        try {
-            ManualECDiffieHellman alice = new ManualECDiffieHellman();
-            alice.generateKeyPair();
-
-            // Get Bob's public key from server
-            String bobKeyStr = webClient.get()
-                    .uri("/api/users/{username}/public-key", contact)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
-
-            // Parse Bob's public key
-            String[] coords = bobKeyStr.split(",");
-            ManualECDiffieHellman.ECPoint bobPublicKey =
-                    new ManualECDiffieHellman.ECPoint(
-                            new BigInteger(coords[0]),
-                            new BigInteger(coords[1])
-                    );
-
-            // Compute shared secret
-            alice.computeSharedSecret(bobPublicKey);
-
-            // Store secret
-            sharedSecrets.put(contact, deriveAESKey(alice.getSharedSecret()));
-
-            updateChatHistory(contact, "Manual ECDH Successful!", false);
-        } catch (Exception e) {
-            updateChatHistory(contact, "Manual ECDH Failed: " + e.getMessage(), false);
-        }
-    }
 
 
 
@@ -614,109 +547,51 @@ public class MainGUI extends Application {
         return contactList.getSelectionModel().getSelectedItem();
     }
 
-    private void performKeyExchange(String contact, String algorithm) {
-        keyExchangeInstances.put(contact, algorithm);
 
-        new Thread(() -> {
-            try {
-                Object cryptoInstance;
-                String publicKeyToSend;
-
-                switch (algorithm) {
-                    case "Diffie-Hellman":
-                        DiffieHellmanExample dh = new DiffieHellmanExample();
-                        cryptoInstance = dh;
-                        publicKeyToSend = dh.getPublicKey();
-                        break;
-
-                    case "ECDH":
-                        ECDiffieHellmanExample ecdh = new ECDiffieHellmanExample();
-                        cryptoInstance = ecdh;
-                        publicKeyToSend = ecdh.getPublicKey();
-                        break;
-
-                    case "Manual DH":
-                        ManualDiffieHellman manualDH = new ManualDiffieHellman();
-                        manualDH.initialize();
-                        cryptoInstance = manualDH;
-                        publicKeyToSend = manualDH.getPublicKey();
-                        break;
-
-                    case "Manual ECDH":
-                        ManualECDiffieHellman manualECDH = new ManualECDiffieHellman();
-                        manualECDH.generateKeyPair();
-                        cryptoInstance = manualECDH;
-                        publicKeyToSend = manualECDH.getPublicKey();
-                        break;
-
-                    default: throw new IllegalArgumentException("Invalid algorithm");
-                }
-
-                // Exchange public keys through server
-                webClient.put()
-                        .uri("/api/users/{username}/public-key", currentUser)
-                        .bodyValue(publicKeyToSend)
-                        .retrieve()
-                        .toBodilessEntity()
-                        .block();
-
-                // Get partner's public key
-                String partnerKey = webClient.get()
-                        .uri("/api/users/{username}/public-key", contact)
-                        .retrieve()
-                        .bodyToMono(String.class)
-                        .block();
-
-                // Compute shared secret
-                byte[] rawSecret = computeSharedSecret(algorithm, cryptoInstance, partnerKey);
-                SecretKey aesKey = deriveAESKey(rawSecret);
-                sharedSecrets.put(contact, aesKey);
-
-                Platform.runLater(() ->
-                        updateChatHistory(contact, algorithm + " key exchange successful!", false));
-
-            } catch (Exception e) {
-                Platform.runLater(() ->
-                        updateChatHistory(contact, "Key exchange failed: " + e.getMessage(), false));
-            }
-        }).start();
-    }
 
 
     private byte[] computeSharedSecret(String algorithm, Object instance, String partnerKey)
             throws Exception {
         switch (algorithm) {
-            case "Diffie-Hellman":
+            case "Diffie-Hellman": {
                 DiffieHellmanExample dh = (DiffieHellmanExample) instance;
-                PublicKey dhPublicKey = KeyFactory.getInstance("DH")
+                PublicKey dhPub = KeyFactory.getInstance("DH")
                         .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(partnerKey)));
-                dh.performKeyExchange(dhPublicKey);
+                dh.performKeyExchange(dhPub);
                 return dh.getSharedSecret();
-
-            case "ECDH":
+            }
+            case "ECDH": {
                 ECDiffieHellmanExample ecdh = (ECDiffieHellmanExample) instance;
-                PublicKey ecPublicKey = KeyFactory.getInstance("EC")
+                PublicKey ecPub = KeyFactory.getInstance("EC")
                         .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(partnerKey)));
-                ecdh.performKeyExchange(ecPublicKey);
+                ecdh.performKeyExchange(ecPub);
                 return ecdh.getSharedSecret();
-
-            case "Manual DH":
+            }
+            case "Manual DH": {
                 ManualDiffieHellman manualDH = (ManualDiffieHellman) instance;
                 BigInteger dhPublic = new BigInteger(partnerKey);
                 manualDH.computeSharedSecret(dhPublic);
                 return manualDH.getSharedSecret();
-
-            case "Manual ECDH":
-                ManualECDiffieHellman manualECDH = (ManualECDiffieHellman) instance;
-                String[] coords = partnerKey.split(",");
-                ManualECDiffieHellman.ECPoint point = new ManualECDiffieHellman.ECPoint(
-                        new BigInteger(coords[0]), new BigInteger(coords[1]));
-                manualECDH.computeSharedSecret(point);
-                return manualECDH.getSharedSecret();
-
-            default: throw new IllegalArgumentException("Invalid algorithm");
+            }
+            case "Manual ECDH": {
+                ManualECDiffieHellman ecdhImp = (ManualECDiffieHellman) instance;
+                // partnerKey is hex string of uncompressed point 04||X||Y
+                byte[] raw = hexStringToByteArray(partnerKey);
+                if (raw[0] != 0x04 || raw.length != 65) {
+                    throw new IllegalArgumentException("Invalid EC public key format");
+                }
+                byte[] xb = Arrays.copyOfRange(raw, 1, 33);
+                byte[] yb = Arrays.copyOfRange(raw, 33, 65);
+                BigInteger x = new BigInteger(1, xb), y = new BigInteger(1, yb);
+                ManualECDiffieHellman.ECPointAffine pt = new ManualECDiffieHellman.ECPointAffine(x, y);
+                ecdhImp.computeSharedSecret(pt);
+                return ecdhImp.getSharedSecret();
+            }
+            default:
+                throw new IllegalArgumentException("Invalid algorithm");
         }
     }
+
 
 
     private SecretKey deriveAESKey(byte[] sharedSecret) {
