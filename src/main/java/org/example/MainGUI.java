@@ -27,6 +27,7 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
+import java.security.spec.ECGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 import java.util.List;
@@ -37,7 +38,8 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -72,7 +74,14 @@ public class MainGUI extends Application {
     private final Map<String, SecretKey> sharedSecrets = new ConcurrentHashMap<>();
     private ListView<String> contactList;
     private TabPane chatTabs;
-
+    // Manual DH
+    private final Map<String, ManualDiffieHellman> manualDhInstances = new ConcurrentHashMap<>();
+    // Library DH
+    private final Map<String, KeyPair> dhLibKeyPairs     = new ConcurrentHashMap<>();
+    // Manual ECDH
+    private final Map<String, ManualECDiffieHellman> manualEcdhInstances = new ConcurrentHashMap<>();
+    // Library ECDH
+    private final Map<String, KeyPair> ecdhLibKeyPairs   = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
         launch(args);
@@ -201,39 +210,7 @@ public class MainGUI extends Application {
     }
 
 
-//    private void checkMessages() {
-//        try {
-//            List<Message> messages = webClient.get()
-//                    .uri("/api/messages/{username}", currentUser)
-//                    .header("Authorization", authHeader)
-//                    .retrieve()
-//                    .onStatus(
-//                            status -> status == HttpStatus.UNAUTHORIZED,
-//                            response -> Mono.error(new RuntimeException("Unauthorized"))
-//                    )
-//                    .bodyToFlux(Message.class)
-//                    .collectList()
-//                    .block();
-//
-//            if (messages != null) {
-//                messages.forEach(msg -> {
-//                    String sender = msg.getSender().getUsername();
-//                    try {
-//                        SecretKey aesKey = sharedSecrets.get(sender);
-//                        if (aesKey != null) {
-//                            String decrypted = decryptMessage(msg, aesKey);
-//                            updateChatHistory(sender, decrypted, false);
-//                        }
-//                    } catch (Exception e) {
-//                        updateChatHistory(sender, "Decryption failed: " + e.getMessage(), false);
-//                    }
-//                });
-//            }
-//        } catch (Exception e) {
-//            Platform.runLater(() ->
-//                    updateChatHistory("System", "Error checking messages: " + e.getMessage(), false));
-//        }
-//    }
+
 
 
 
@@ -294,182 +271,8 @@ public class MainGUI extends Application {
         }
     }
 
-    private void addMessageToChat(String message, boolean isUserMessage) {
-        String formattedMessage = (isUserMessage ? "You: " : "System: ") + message;
-        Platform.runLater(() -> {
-            chatMessages.add(formattedMessage);
-            chatList.scrollTo(chatMessages.size() - 1);
-        });
-    }
-
-    private VBox createContactsPanel() {
-        VBox contactsPanel = new VBox();
-        contactList = new ListView<>(); // Initialize contactList
-        contactList.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
-
-        // Add sample contacts (replace with real data later)
-        ObservableList<String> contacts = FXCollections.observableArrayList(
-                "Alice", "Bob"
-        );
-        contactList.setItems(contacts);
-
-        contactsPanel.getChildren().addAll(
-                new Label("Contacts"),
-                contactList
-        );
-        return contactsPanel;
-    }
-
-//    private VBox createChatContainer() {
-//        VBox chatContainer = new VBox();
-//        chatContainer.getStyleClass().add("chat-container");
-//
-//        // Chat header
-//        HBox chatHeader = new HBox(10);
-//        chatHeader.getStyleClass().add("chat-header");
-//        Label chatTitle = new Label("Alice");
-//        chatTitle.getStyleClass().add("chat-title");
-//
-//        HBox controls = new HBox(10);
-//        algorithmChoice = new ChoiceBox<>();
-//        algorithmChoice.getItems().addAll("Diffie-Hellman", "ECDH", "Manual DH", "Manual ECDH");
-//        algorithmChoice.setValue("Manual ECDH");
-//        algorithmChoice.getStyleClass().add("algorithm-choice");
-//
-//        Button startExchangeBtn = new Button("Start Key Exchange");
-//        startExchangeBtn.getStyleClass().add("exchange-btn");
-//        startExchangeBtn.setOnAction(e -> startKeyExchange());
-//
-//        controls.getChildren().addAll(
-//                new Label("Algorithm:"), algorithmChoice, startExchangeBtn
-//        );
-//
-//        chatHeader.getChildren().addAll(chatTitle, controls);
-//
-//        // chat
-//        chatList = new ListView<>();
-//        chatList.getStyleClass().add("chat-list");
-//        VBox.setVgrow(chatList, Priority.ALWAYS); // proper sizing
-//        chatList.setCellFactory(param -> new MessageCell());
-//
-//        // Message input area
-//        HBox messageBox = new HBox(10);
-//        messageBox.getStyleClass().add("message-box");
-//
-//
-//        messageInput = new TextField();
-//        messageInput.setPromptText("Type your message...");
-//        messageInput.getStyleClass().add("message-input");
-//
-//        Button sendBtn = new Button("Send");
-//        sendBtn.getStyleClass().add("send-btn");
-//        sendBtn.setOnAction(e -> {
-//            String message = messageInput.getText();
-//            if (!message.isEmpty()) {
-//                String contact = getSelectedContact();
-//                sendMessage(contact, message);
-//                messageInput.clear();
-//            }
-//        });
-////
-////        sendBtn.setOnAction(e -> {
-////            String message = messageInput.getText();
-////            if (message.isEmpty()) return;
-////
-////            String contact = getSelectedContact();
-////            if (chatTabs != null && !chatTabs.getTabs().isEmpty()) {
-////                sendMessage(contact, message);
-////                messageInput.clear();
-////            } else {
-////                updateChatHistory("System", "No active chat selected", false);
-////            }
-////        });
-//
-//        messageBox.getChildren().addAll(messageInput, sendBtn);
-//
-//        chatContainer.getChildren().addAll(chatHeader, chatList, messageBox);
-//        return chatContainer;
-//    }
 
 
-    private static class MessageCell extends ListCell<String> {
-        private final Label messageLabel = new Label();
-        private final HBox container = new HBox();
-        private final Region spacer = new Region();
-
-        public MessageCell() {
-            super();
-            container.setMaxWidth(Double.MAX_VALUE);
-            HBox.setHgrow(spacer, Priority.ALWAYS);
-
-            messageLabel.setWrapText(true);
-            messageLabel.setMaxWidth(300);
-            messageLabel.setPadding(new Insets(8));
-            messageLabel.getStyleClass().add("message-bubble");
-        }
-        @Override
-        protected void updateItem(String message, boolean empty) {
-            super.updateItem(message, empty);
-            setText(null);
-
-            if (empty || message == null) {
-                setGraphic(null);
-            } else {
-                messageLabel.setText(message);
-                if (message.startsWith("You:")) {
-                    messageLabel.getStyleClass().add("sent-message");
-                    container.getChildren().setAll(spacer, messageLabel);
-                } else {
-                    messageLabel.getStyleClass().add("received-message");
-                    container.getChildren().setAll(messageLabel, spacer);
-                }
-                setGraphic(container);
-            }
-        }
-    }
-
-
-
-//    private void startKeyExchange() {
-//        String algorithm = algorithmChoice.getValue();
-//        String contact = getSelectedContact();
-//
-//        if (contact == null || contact.isEmpty()) {
-//            updateChatHistory("System", "Select a contact first!", false);
-//            return;
-//        }
-//
-//        new Thread(() -> {
-//            try {
-//                switch (algorithm) {
-//                    case "Diffie-Hellman":
-//                        DiffieHellmanExample dh = new DiffieHellmanExample();
-//                        PublicKey partnerKey = getPartnerPublicKey(contact, "DH");
-//                        dh.performKeyExchange(partnerKey);
-//                        break;
-//
-//                    case "ECDH":
-//                        ECDiffieHellmanExample ecdh = new ECDiffieHellmanExample();
-//                        PublicKey ecPartnerKey = getPartnerPublicKey(contact, "EC");
-//                        ecdh.performKeyExchange(ecPartnerKey);
-//                        break;
-//
-//                    case "Manual DH":
-//                        runManualDH(contact);
-//                        break;
-//
-//                    case "Manual ECDH":
-//                        runManualECDH(contact);
-//                        break;
-//                }
-//                Platform.runLater(() ->
-//                        updateChatHistory(contact, algorithm + " key exchange completed!", false));
-//            } catch (Exception e) {
-//                Platform.runLater(() ->
-//                        updateChatHistory(contact, "Key exchange failed: " + e.getMessage(), false));
-//            }
-//        }).start();
-//    }
 
     private void startKeyExchange() {
         String contact = getSelectedContact();
@@ -477,17 +280,21 @@ public class MainGUI extends Application {
             updateChat("System", "Select a contact first!", false);
             return;
         }
+        String alg = algorithmChoice.getValue();
 
-        String algorithm = algorithmChoice.getValue();
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
-                switch (algorithm) {
+                switch (alg) {
                     case "Manual DH":
-                        performManualDh(contact);
-                        break;
-                    // TODO: mirror this pattern for “DH”, “Manual ECDH”, “ECDH”
+                        performManualDh(contact); break;
+                    case "DH":
+                        performDhWithLibrary(contact); break;
+                    case "Manual ECDH":
+                        performManualEcdh(contact); break;
+                    case "ECDH":
+                        performEcdhWithLibrary(contact); break;
                     default:
-                        throw new IllegalStateException("Unsupported algorithm: " + algorithm);
+                        throw new IllegalStateException("Unknown algorithm: " + alg);
                 }
                 Platform.runLater(() ->
                         updateChat("System", "Key exchange with " + contact + " successful!", false)
@@ -499,34 +306,35 @@ public class MainGUI extends Application {
             }
         });
     }
-    private void performManualECDH(String contact) throws Exception {
-        ManualECDiffieHellman ecdh = new ManualECDiffieHellman();
-        ecdh.generateKeyPair();
 
-        // Exchange public keys through server
-        webClient.put()
-                .uri("/api/users/{username}/public-key", currentUser)
-                .bodyValue(ecdh.getPublicKey())
-                .retrieve()
-                .toBodilessEntity()
-                .block();
 
-        // Get partner's public key
-        String partnerKey = webClient.get()
-                .uri("/api/users/{username}/public-key", contact)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
 
-        // Parse and compute shared secret
-        ManualECDiffieHellman.ECPoint partnerPoint = parseECPoint(partnerKey);
-        ecdh.computeSharedSecret(partnerPoint);
+    private void performManualEcdh(String contact) throws Exception {
+        ManualECDiffieHellman me = manualEcdhInstances.computeIfAbsent(contact, c -> {
+            try {
+                ManualECDiffieHellman inst = new ManualECDiffieHellman();
+                inst.generateKeyPair();
+                webClient.put()
+                        .uri(b -> b.path("/api/users/{u}/public-key").build(currentUser))
+                        .bodyValue(inst.getPublicKey())
+                        .retrieve().toBodilessEntity().block();
+                return inst;
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        });
 
-        // Store derived AES key
-        byte[] rawSecret = ecdh.getSharedSecret();
-        SecretKey aesKey = deriveAESKey(rawSecret);
-        sharedSecrets.put(contact, aesKey);
+        String partner = pollForKey(contact);
+        // parse “x,y”
+        String[] parts = partner.split(",");
+        ManualECDiffieHellman.ECPoint pPoint =
+                new ManualECDiffieHellman.ECPoint(new BigInteger(parts[0]), new BigInteger(parts[1]));
+
+        me.computeSharedSecret(pPoint);
+        sharedSecrets.put(contact, deriveAESKey(me.getSharedSecret()));
     }
+
+
     private ManualECDiffieHellman.ECPoint parseECPoint(String keyStr) throws NumberFormatException {
         String[] parts = keyStr.split(",");
         if (parts.length != 2) {
@@ -587,52 +395,91 @@ public class MainGUI extends Application {
 
 
     private void performDhWithLibrary(String contact) throws Exception {
-        DiffieHellmanExample dhExample = new DiffieHellmanExample();
-        String myPubEncoded = dhExample.getPublicKey();  // base64-encoded X.509
+        // 1) generate or reuse our DH keypair
+        KeyPair kp = dhLibKeyPairs.computeIfAbsent(contact, c -> {
+            try {
+                KeyPairGenerator g = KeyPairGenerator.getInstance("DH");
+                g.initialize(2048);
+                KeyPair pair = g.generateKeyPair();
+                // upload our public key
+                String pubB64 = Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
+                webClient.put()
+                        .uri(b -> b.path("/api/users/{u}/public-key").build(currentUser))
+                        .bodyValue(pubB64)
+                        .retrieve().toBodilessEntity().block();
+                return pair;
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        });
 
-        // send yours
-        webClient.put()
-                .uri("/api/users/{username}/public-key", currentUser)
-                .bodyValue(myPubEncoded)
-                .retrieve().toBodilessEntity().block();
+        // 2) poll partner
+        String partnerB64 = pollForKey(contact);
 
-        // fetch theirs
-        String partnerPubB64 = webClient.get()
-                .uri("/api/users/{username}/public-key", contact)
-                .retrieve().bodyToMono(String.class).block();
-
-        // compute shared secret
+        // 3) reconstruct their PublicKey
+        byte[] decoded = Base64.getDecoder().decode(partnerB64);
         PublicKey partnerKey = KeyFactory.getInstance("DH")
-                .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(partnerPubB64)));
-        dhExample.performKeyExchange(partnerKey);
-        byte[] rawSecret = dhExample.getSharedSecret();
+                .generatePublic(new X509EncodedKeySpec(decoded));
 
-        SecretKey aesKey = deriveAESKey(rawSecret);
-        sharedSecrets.put(contact, aesKey);
+        // 4) do key agreement
+        KeyAgreement ka = KeyAgreement.getInstance("DH");
+        ka.init(kp.getPrivate());
+        ka.doPhase(partnerKey, true);
+        byte[] raw = ka.generateSecret();
+        sharedSecrets.put(contact, deriveAESKey(raw));
     }
 
 
     private void performEcdhWithLibrary(String contact) throws Exception {
-        ECDiffieHellmanExample ecExample = new ECDiffieHellmanExample();
-        String myPub = ecExample.getPublicKey();
+        // 1) generate or reuse our EC keypair
+        KeyPair kp = ecdhLibKeyPairs.computeIfAbsent(contact, c -> {
+            try {
+                KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
+                g.initialize(new ECGenParameterSpec("secp256r1"));
+                KeyPair pair = g.generateKeyPair();
+                String pubB64 = Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
+                webClient.put()
+                        .uri(b -> b.path("/api/users/{u}/public-key").build(currentUser))
+                        .bodyValue(pubB64)
+                        .retrieve().toBodilessEntity().block();
+                return pair;
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        });
 
-        webClient.put()
-                .uri("/api/users/{username}/public-key", currentUser)
-                .bodyValue(myPub).retrieve().toBodilessEntity().block();
+        // 2) poll partner
+        String partnerB64 = pollForKey(contact);
 
-        String partnerPub = webClient.get()
-                .uri("/api/users/{username}/public-key", contact)
-                .retrieve().bodyToMono(String.class).block();
-
+        // 3) reconstruct and agree
+        byte[] decoded = Base64.getDecoder().decode(partnerB64);
         PublicKey partnerKey = KeyFactory.getInstance("EC")
-                .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(partnerPub)));
-        ecExample.performKeyExchange(partnerKey);
+                .generatePublic(new X509EncodedKeySpec(decoded));
 
-        SecretKey aesKey = deriveAESKey(ecExample.getSharedSecret());
-        sharedSecrets.put(contact, aesKey);
+        KeyAgreement ka = KeyAgreement.getInstance("ECDH");
+        ka.init(kp.getPrivate());
+        ka.doPhase(partnerKey, true);
+        byte[] raw = ka.generateSecret();
+        sharedSecrets.put(contact, deriveAESKey(raw));
     }
 
-
+    /** Polls /api/users/{contact}/public-key until non-empty or times out */
+    private String pollForKey(String contact) {
+        String keyStr;
+        final int MAX = 20;
+        for (int i = 0; i < MAX; i++) {
+            keyStr = webClient.get()
+                    .uri(b -> b.path("/api/users/{u}/public-key").build(contact))
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+            if (keyStr != null && !keyStr.isBlank()) {
+                return keyStr;
+            }
+            try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+        }
+        throw new RuntimeException("Timed out waiting for " + contact + " to publish their public key");
+    }
     private PublicKey getPartnerPublicKey(String contact, String algorithm) throws Exception {
         String keyStr = webClient.get()
                 .uri("/api/users/{username}/public-key", contact)
@@ -918,45 +765,5 @@ public class MainGUI extends Application {
 
 
 
-    private byte[] completeKeyExchange(String algorithm, Object cryptoInstance, String partnerKey)
-            throws Exception {
-        switch (algorithm) {
-            case "Diffie-Hellman":
-                KeyAgreement dhAgreement = (KeyAgreement) cryptoInstance;
-                PublicKey dhPublicKey = KeyFactory.getInstance("DH")
-                        .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(partnerKey)));
-                dhAgreement.doPhase(dhPublicKey, true);
-                return dhAgreement.generateSecret();
-
-            case "ECDH":
-                KeyAgreement ecAgreement = (KeyAgreement) cryptoInstance;
-                PublicKey ecPublicKey = KeyFactory.getInstance("EC")
-                        .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(partnerKey)));
-                ecAgreement.doPhase(ecPublicKey, true);
-                return ecAgreement.generateSecret();
-
-            case "Manual DH":
-                ManualDiffieHellman manualDH = (ManualDiffieHellman) cryptoInstance;
-                BigInteger partnerPublicKey = new BigInteger(partnerKey);
-                return manualDH.computeSharedSecret(
-                        manualDH.getPrivateKey(),
-                        partnerPublicKey
-                );
-
-            case "Manual ECDH":
-                ManualECDiffieHellman manualECDH = (ManualECDiffieHellman) cryptoInstance;
-                String[] coordinates = partnerKey.split(",");
-                ManualECDiffieHellman.ECPoint partnerPoint =
-                        new ManualECDiffieHellman.ECPoint(
-                                new BigInteger(coordinates[0]),
-                                new BigInteger(coordinates[1])
-                        );
-                manualECDH.computeSharedSecret(partnerPoint);
-                return manualECDH.getSharedSecret();
-
-            default:
-                throw new IllegalArgumentException("Unsupported algorithm");
-        }
-    }
 
 }

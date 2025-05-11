@@ -92,21 +92,6 @@ public class ManualECDiffieHellman {
         return multiplyPoint(G, privateKey);
     }
 
-    public byte[] computeSharedSecret(BigInteger privateKey, ECPoint otherPublicKey)
-            throws InvalidKeyException {
-        if (!isPointOnCurve(otherPublicKey)) {
-            throw new InvalidKeyException("Public key point is not on the curve");
-        }
-
-        ECPoint sharedPoint = multiplyPoint(otherPublicKey, privateKey);
-        if (sharedPoint.infinity) {
-            throw new InvalidKeyException("Invalid shared point at infinity");
-        }
-
-        assert sharedPoint.x != null;
-        return deriveKey(sharedPoint.x.toByteArray());
-    }
-
     private ECPoint addPoints(ECPoint p1, ECPoint p2) {
         if (p1.infinity) return p2;
         if (p2.infinity) return p1;
