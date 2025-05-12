@@ -1,114 +1,132 @@
 package org.example;
 
-import org.bouncycastle.crypto.digests.SHA256Digest;
-import org.bouncycastle.crypto.generators.HKDFBytesGenerator;
-import org.bouncycastle.crypto.params.HKDFParameters;
 
 import java.math.BigInteger;
 import java.security.InvalidKeyException;
 import java.security.SecureRandom;
+import java.math.BigInteger;
+import java.security.InvalidKeyException;
+import java.security.SecureRandom;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
 
 public class ManualDiffieHellman {
-    private static final BigInteger P = new BigInteger("FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A63A36210000000000090563", 16);
+    // 2048-bit MODP Group 14 prime
+    private static final BigInteger P = new BigInteger(
+            "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1" +
+                    "29024E088A67CC74020BBEA63B139B22514A08798E3404DD" +
+                    "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245" +
+                    "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED" +
+                    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381" +
+                    "FFFFFFFFFFFFFFFF", 16);
     private static final BigInteger G = BigInteger.valueOf(2);
-    private static final BigInteger TWO = BigInteger.valueOf(2);
+    // Subgroup order q=(P-1)/2
+    private static final BigInteger Q = P.subtract(BigInteger.ONE).divide(BigInteger.valueOf(2));
 
-    private final SecureRandom secureRandom;
-    private byte[] sharedSecret;
-    private BigInteger privateKey;
-    private BigInteger publicKey;
+    private final SecureRandom rnd = new SecureRandom();
+    private BigInteger a;     // private exponent
+    private BigInteger A;     // public value g^a mod p
+    private byte[] shared;    // derived key
 
-    public ManualDiffieHellman() {
-        this.secureRandom = new SecureRandom();
-    }
-
+    /**
+     * Generate key pair.
+     */
     public void initialize() {
-        this.privateKey = generatePrivateKey();
-        this.publicKey = generatePublicKey(privateKey);
+        // choose a uniformly in [2, P-2]
+        BigInteger two = BigInteger.valueOf(2);
+        BigInteger max = P.subtract(two);
+        do {
+            a = new BigInteger(P.bitLength(), rnd);
+        } while (a.compareTo(two) < 0 || a.compareTo(max) > 0);
+
+        // blinded exponentiation: compute A = g^(a + kQ) mod P for random k
+        BigInteger k = new BigInteger(Q.bitLength(), rnd);
+        BigInteger exp = a.add(k.multiply(Q));
+        A = G.modPow(exp, P);
     }
 
-
-    public void computeSharedSecret(BigInteger partnerPublicKey) throws InvalidKeyException {
-        if (!isValidPublicKey(partnerPublicKey)) {
+    /**
+     * Compute shared key from peer's public value B.
+     * @param B peer's public value
+     * @throws InvalidKeyException if B or the shared secret is invalid
+     */
+    public void computeSharedSecret(BigInteger B) throws InvalidKeyException {
+        // Valid public: 2 <= B <= P-2 and B^Q mod P == 1
+        if (B.compareTo(BigInteger.TWO) < 0 || B.compareTo(P.subtract(BigInteger.TWO)) > 0
+                || !B.modPow(Q, P).equals(BigInteger.ONE)) {
             throw new InvalidKeyException("Invalid public key");
         }
 
-        BigInteger shared = partnerPublicKey.modPow(privateKey, P);
-        if (!isValidSharedSecret(shared)) {
+        // Blinded exponentiation for shared secret
+        BigInteger k = new BigInteger(Q.bitLength(), rnd);
+        BigInteger exp = a.add(k.multiply(Q));
+        BigInteger s = B.modPow(exp, P);
+
+        // Validate s in subgroup: s^Q mod P == 1
+        if (!s.modPow(Q, P).equals(BigInteger.ONE)) {
             throw new InvalidKeyException("Invalid shared secret");
         }
 
-        this.sharedSecret = deriveKey(shared.toByteArray());
+        // Derive 32-byte key via HKDF-SHA256
+        byte[] ikm = toFixed(s);
+        byte[] salt = null; // optional
+        byte[] info = "DH shared secret".getBytes();
+        shared = hkdfSha256(ikm, salt, info, 32);
     }
 
-    public String getPublicKey() {
-        return publicKey.toString();
+    /** @return public key g^a mod p */
+    public BigInteger getPublicKey() {
+        return A;
     }
 
-    public BigInteger getPrivateKey() {
-        return this.privateKey;
-    }
+    /** @return 32-byte derived shared key */
     public byte[] getSharedSecret() {
-        return sharedSecret;
-    }
-    // Changed to public
-    public BigInteger generatePrivateKey() {
-        BigInteger pMinusTwo = P.subtract(TWO);
-        BigInteger privateKey;
-        do {
-            privateKey = new BigInteger(P.bitLength(), secureRandom);
-        } while (privateKey.compareTo(TWO) < 0 || privateKey.compareTo(pMinusTwo) > 0);
-        return privateKey;
+        return shared;
     }
 
-    public BigInteger generatePublicKey(BigInteger privateKey) {
-        return G.modPow(privateKey, P);
-    }
-
-    public byte[] computeSharedSecret(BigInteger privateKey, BigInteger otherPublicKey)
-            throws InvalidKeyException {
-        if (!isValidPublicKey(otherPublicKey)) {
-            throw new InvalidKeyException("Invalid public key");
-        }
-
-        BigInteger sharedSecret = otherPublicKey.modPow(privateKey, P);
-
-        if (!isValidSharedSecret(sharedSecret)) {
-            throw new InvalidKeyException("Invalid shared secret computed");
-        }
-
-        return deriveKey(sharedSecret.toByteArray());
-    }
-
-    private boolean isValidPublicKey(BigInteger publicKey) {
-        return publicKey.compareTo(TWO) >= 0 &&
-                publicKey.compareTo(P.subtract(TWO)) <= 0;
-    }
-
-    private boolean isValidSharedSecret(BigInteger secret) {
-        return !secret.equals(BigInteger.ONE) &&
-                !secret.equals(BigInteger.ZERO) &&
-                !secret.equals(P.subtract(BigInteger.ONE));
-    }
-
-    private byte[] deriveKey(byte[] sharedSecret) {
+    // ======== HKDF-SHA256 Extract-and-Expand ========
+    private byte[] hkdfSha256(byte[] ikm, byte[] salt, byte[] info, int len) {
         try {
-            // Example HKDF /w SHA-256
-            HKDFParameters params = new HKDFParameters(sharedSecret, null, null);
-            HKDFBytesGenerator hkdf = new HKDFBytesGenerator(new SHA256Digest());
-            hkdf.init(params);
+            if (salt == null) salt = new byte[32];
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(salt, "HmacSHA256"));
+            byte[] prk = mac.doFinal(ikm);
 
-            byte[] derivedKey = new byte[32]; // 256 bits
-            hkdf.generateBytes(derivedKey, 0, derivedKey.length);
-            return derivedKey;
+            int hashLen = 32;
+            int n = (len + hashLen - 1) / hashLen;
+            byte[] okm = new byte[len];
+            byte[] prev = new byte[0];
+            int pos = 0;
+            for (int i = 1; i <= n; i++) {
+                mac.init(new SecretKeySpec(prk, "HmacSHA256"));
+                mac.update(prev);
+                if (info != null) mac.update(info);
+                mac.update((byte) i);
+                byte[] out = mac.doFinal();
+                int toCopy = Math.min(hashLen, len - pos);
+                System.arraycopy(out, 0, okm, pos, toCopy);
+                pos += toCopy;
+                prev = out;
+            }
+            return okm;
         } catch (Exception e) {
-            throw new RuntimeException("Key derivation failed", e);
+            throw new RuntimeException("HKDF failed", e);
         }
     }
 
-
-
-    public void setSharedSecret(byte[] sharedSecret) {
-        this.sharedSecret = sharedSecret;
+    // Encode BigInteger to fixed 256-byte array
+    private byte[] toFixed(BigInteger v) {
+        byte[] b = v.toByteArray();
+        if (b.length > 256) {
+            byte[] tmp = new byte[256];
+            System.arraycopy(b, b.length - 256, tmp, 0, 256);
+            return tmp;
+        } else if (b.length < 256) {
+            byte[] tmp = new byte[256];
+            System.arraycopy(b, 0, tmp, 256 - b.length, b.length);
+            return tmp;
+        }
+        return b;
     }
 }

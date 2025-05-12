@@ -321,6 +321,7 @@ public class MainGUI extends Application {
                 // Publish pubkey
                 webClient.put()
                         .uri("/api/users/{u}/public-key", currentUser)
+                        .contentType(MediaType.TEXT_PLAIN)          // ← here
                         .bodyValue(inst.getPublicKey())
                         .retrieve().toBodilessEntity().block();
                 return inst;
@@ -363,7 +364,8 @@ public class MainGUI extends Application {
             webClient.put()
                     .uri(uriBuilder -> uriBuilder
                             .path("/api/users/{u}/public-key").build(currentUser))
-                    .bodyValue(instance.getPublicKey())
+                    .contentType(MediaType.TEXT_PLAIN)          // ← here
+                    .bodyValue(instance.getPublicKey().toString())
                     .retrieve().toBodilessEntity().block();
 
             return instance;
