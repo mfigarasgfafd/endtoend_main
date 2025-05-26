@@ -17,6 +17,8 @@ import java.util.Arrays;
 import java.util.Base64;
 
 
+// tutaj można łatwiejsze testy wykonywać, teraz nieużywana
+// TODO: delete later
 
 public class Main {
     public static void main(String[] args) {

@@ -2,8 +2,6 @@ package org.example;
 
 import java.math.BigInteger;
 import java.security.InvalidKeyException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import javax.crypto.Mac;
@@ -20,11 +18,6 @@ public class ManualECDiffieHellman {
             new BigInteger("4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5", 16)
     );
 
-    private final SecureRandom secureRandom = new SecureRandom();
-
-    private BigInteger privateKey;
-    private ECPointAffine publicKey;
-    private byte[] sharedSecret;
     private BigInteger d;
     private ECPointAffine Q;
     private byte[] shared;
@@ -43,7 +36,7 @@ public class ManualECDiffieHellman {
         Q = cand;
     }
 
-    // Compute shared secret and derive via HKDF-SHA256
+    // compute shared secret and derive via HKDF-SHA256
     public void computeSharedSecret(ECPointAffine Ppub) throws InvalidKeyException {
         if (!isOnCurve(Ppub) || !inSubgroup(Ppub))
             throw new InvalidKeyException("Invalid partner public key");
@@ -72,16 +65,8 @@ public class ManualECDiffieHellman {
 
     // ========== PRIVATE HELPERS ===========
 
-    // Standard uniform private key
-    private BigInteger generatePrivateKey() {
-        BigInteger d;
-        do {
-            d = new BigInteger(N.bitLength(), secureRandom);
-        } while (d.compareTo(BigInteger.ONE) < 0 || d.compareTo(N.subtract(BigInteger.ONE)) > 0);
-        return d;
-    }
 
-    // Constant-time Montgomery ladder on Jacobian coords
+    // constant-time Montgomery ladder /w Jacobian coords
     private ECPointJacobian scalarMult(ECPointJacobian Pj, BigInteger k) {
         ECPointJacobian R0 = ECPointJacobian.INF, R1 = Pj;
         for (int i=k.bitLength()-1;i>=0;i--) {
@@ -91,7 +76,7 @@ public class ManualECDiffieHellman {
         return R0;
     }
 
-    // Validate subgroup: [n]P == infinity
+    // validate subgroup: [n]P == infinity
     private boolean inSubgroup(ECPointAffine pt) {
         // check [n]P == INF
         return scalarMult(pt.toJacobian(), N).isInfinity();
@@ -198,7 +183,7 @@ public class ManualECDiffieHellman {
     }
 
 
-    // ======== UTIL ========
+    // ======== INNE UTIL ========
     private byte[] toFixedLength(BigInteger v) {
         byte[] b = v.toByteArray();
         if (b.length == 33 && b[0] == 0) {

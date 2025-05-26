@@ -12,6 +12,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.security.PublicKey;
 
 
+// ta klasa ma dużo nieużywanych w MainGUI funkcji, jest tylko do testowania w Main
+
 public class ChatClient {
     private User localUser;
     private KeyPair keyPair;
@@ -64,7 +66,7 @@ public class ChatClient {
             // Encrypt message
             CipherResult encrypted = encryptMessage(message, sharedSecret);
 
-            // Send to backend - convert UUID to String
+            // Send to backend - UUID to String
             webClient.post()
                     .uri("/api/messages")
                     .bodyValue(new MessageRequest(
@@ -128,8 +130,6 @@ public class ChatClient {
     private record CipherResult(String ciphertext, String iv) {}
 
     private CipherResult encryptMessage(String plaintext, byte[] sharedSecret) {
-        // Implement your encryption logic
-        // Return ciphertext + IV
         return null;
     }
 }

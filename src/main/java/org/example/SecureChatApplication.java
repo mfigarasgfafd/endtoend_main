@@ -28,31 +28,31 @@ public class SecureChatApplication {
             ChatService chatService
     ) {
         return args -> {
-            // Generate test users with keys
-            User alice = createTestUser("alice", "ECDH");
-            User bob = createTestUser("bob", "DH");
-
-            userRepository.save(alice);
-            userRepository.save(bob);
+//            // Generate test users with keys
+//            User alice = createTestUser("alice", "ECDH");
+//            User bob = createTestUser("bob", "DH");
+//
+//            userRepository.save(alice);
+//            userRepository.save(bob);
 
             System.out.println("Test users created:");
-            System.out.println("Alice ID: " + alice.getUserId());
-            System.out.println("Bob ID: " + bob.getUserId());
+//            System.out.println("Alice ID: " + alice.getUserId());
+//            System.out.println("Bob ID: " + bob.getUserId());
         };
     }
 
-    private User createTestUser(String username, String algorithm) throws Exception {
-        KeyPair keyPair = generateKeyPair(algorithm);
-        String publicKey = Base64.getEncoder().encodeToString(
-                keyPair.getPublic().getEncoded()
-        );
-
-        User user = new User();
-        user.setUsername(username);
-        user.setPublicKey(publicKey);
-        return user;
-    }
-
+//    private User createTestUser(String username, String algorithm) throws Exception {
+//        KeyPair keyPair = generateKeyPair(algorithm);
+//        String publicKey = Base64.getEncoder().encodeToString(
+//                keyPair.getPublic().getEncoded()
+//        );
+//
+//        User user = new User();
+//        user.setUsername(username);
+//        user.setPublicKey(publicKey);
+//        return user;
+//    }
+//
     private KeyPair generateKeyPair(String algorithm) throws Exception {
         KeyPairGenerator kpg;
         switch (algorithm.toUpperCase()) {

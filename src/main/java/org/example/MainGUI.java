@@ -18,9 +18,7 @@ import javafx.util.Duration;
 import org.bouncycastle.crypto.digests.SHA256Digest;
 import org.bouncycastle.crypto.generators.HKDFBytesGenerator;
 import org.bouncycastle.crypto.params.HKDFParameters;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.web.reactive.function.client.ExchangeFilterFunctions;
 
 import javax.crypto.KeyAgreement;
 import java.math.BigInteger;
@@ -39,27 +37,16 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
-import reactor.core.publisher.Mono;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static ch.qos.logback.core.encoder.ByteArrayUtil.hexStringToByteArray;
 
 public class MainGUI extends Application {
-    private ManualDiffieHellman manualDhAlice;
-    private ManualDiffieHellman manualDhBob;
-    private ManualECDiffieHellman alice;
-    private ManualECDiffieHellman bob;
 
-    private DiffieHellmanExample dhExample;
-    private ECDiffieHellmanExample ecDhExample;
-    private ManualECDiffieHellman manualEcdhAlice;
 
     private ListView<String> chatList;
     private TextField messageInput;
@@ -72,12 +59,9 @@ public class MainGUI extends Application {
     private String currentUser;
     private String authHeader;
 
-    private Map<String, Object> cryptoInstances = new ConcurrentHashMap<>();
-    private Map<String, ObservableList<String>> chatHistories = new ConcurrentHashMap<>();
-    private final Map<String, Object> keyExchangeInstances = new ConcurrentHashMap<>();
+
     private final Map<String, SecretKey> sharedSecrets = new ConcurrentHashMap<>();
     private ListView<String> contactList;
-    private TabPane chatTabs;
     // Manual DH
     private final Map<String, ManualDiffieHellman> manualDhInstances = new ConcurrentHashMap<>();
     // Library DH
@@ -186,10 +170,10 @@ public class MainGUI extends Application {
 
         messages.forEach(msg -> {
             try {
-                // 1) pull out the sender’s username
+                // 1) pull out sender username
                 String sender = msg.getSenderUsername();
 
-                // 2) look up the shared AES key you derived for that contact
+                // 2) look up the shared AES key you derived for contact
                 SecretKey key = sharedSecrets.get(sender);
                 if (key == null) {
                     throw new IllegalStateException(
@@ -215,45 +199,35 @@ public class MainGUI extends Application {
 
 
 
-
-
-
-    private void updateChatHistory(String contact, String message, boolean isOutgoing) {
-        Platform.runLater(() -> {
-            String formatted = (isOutgoing ? "You: " : contact + ": ") + message;
-            chatMessages.add(formatted);
-            chatList.scrollTo(chatMessages.size() - 1);
-        });
-    }
-
     private void setupMainUI(Stage stage) {
         stage.setTitle("Secure Chat - " + currentUser);
 
+        // TODO: non-fixed kontakty
         // Contact List
         contactList = new ListView<>(FXCollections.observableArrayList("Alice", "Bob"));
         contactList.getSelectionModel().selectedItemProperty().addListener(
                 (obs, old, newContact) -> handleContactSelection(newContact)
         );
 
-        // Chat Area
+        // chat area
         chatList = new ListView<>();
         messageInput = new TextField();
         messageInput.setPromptText("Type your message...");
 
-        // Algorithm Selection
+        // algorithm selection
         algorithmChoice = new ChoiceBox<>(FXCollections.observableArrayList(
                 "Manual ECDH", "Manual DH", "ECDH", "DH"
         ));
         algorithmChoice.setValue("Manual ECDH");
 
-        // Control Buttons
+        // buttons
         Button exchangeBtn = new Button("Start Key Exchange");
         exchangeBtn.setOnAction(e -> startKeyExchange());
 
         Button sendBtn = new Button("Send");
         sendBtn.setOnAction(e -> sendMessage());
 
-        // Layout Configuration
+        // layout config
         VBox chatContainer = new VBox(10,
                 new HBox(10, new Label("Algorithm:"), algorithmChoice, exchangeBtn),
                 chatList,
@@ -313,12 +287,11 @@ public class MainGUI extends Application {
 
 
     private void performManualECDH(String contact) throws Exception {
-        // Generate or reuse ManualECDiffieHellman
         ManualECDiffieHellman ecdh = manualEcdhInstances.computeIfAbsent(contact, c -> {
             ManualECDiffieHellman inst = new ManualECDiffieHellman();
             try {
                 inst.generateKeyPair();
-                // Publish pubkey
+                // Publish public key
                 webClient.put()
                         .uri("/api/users/{u}/public-key", currentUser)
                         .contentType(MediaType.TEXT_PLAIN)          // ← here
@@ -330,7 +303,7 @@ public class MainGUI extends Application {
             }
         });
 
-        // Fetch partner pubkey
+        // Fetch partner public key
         String pk = pollForPublicKey(contact);
         // Expect hex uncompressed: 04||X||Y
         byte[] raw = hexStringToByteArray(pk);
@@ -396,20 +369,19 @@ public class MainGUI extends Application {
         SecretKey aesKey = deriveAESKey(raw);
         sharedSecrets.put(contact, aesKey);
 
-        // 4) (Optional) remove the instance if not planning to re-use it:
-        // dhInstances.remove(contact);
+
     }
 
 
 
     private void performDhWithLibrary(String contact) throws Exception {
-        // 1) generate or reuse our DH keypair
+        // 1) generate or reuse DH keypair
         KeyPair kp = dhLibKeyPairs.computeIfAbsent(contact, c -> {
             try {
                 KeyPairGenerator g = KeyPairGenerator.getInstance("DH");
                 g.initialize(2048);
                 KeyPair pair = g.generateKeyPair();
-                // upload our public key
+                // upload public key
                 String pubB64 = Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
                 webClient.put()
                         .uri(b -> b.path("/api/users/{u}/public-key").build(currentUser))
@@ -429,7 +401,7 @@ public class MainGUI extends Application {
         PublicKey partnerKey = KeyFactory.getInstance("DH")
                 .generatePublic(new X509EncodedKeySpec(decoded));
 
-        // 4) do key agreement
+        // 4) key agreement
         KeyAgreement ka = KeyAgreement.getInstance("DH");
         ka.init(kp.getPrivate());
         ka.doPhase(partnerKey, true);
@@ -439,7 +411,7 @@ public class MainGUI extends Application {
 
 
     private void performEcdhWithLibrary(String contact) throws Exception {
-        // 1) generate or reuse our EC keypair
+        // 1) generate or reuse EC keypair
         KeyPair kp = ecdhLibKeyPairs.computeIfAbsent(contact, c -> {
             try {
                 KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
@@ -488,36 +460,9 @@ public class MainGUI extends Application {
         }
         throw new RuntimeException("Timed out waiting for " + contact + " to publish their public key");
     }
-    private PublicKey getPartnerPublicKey(String contact, String algorithm) throws Exception {
-        String keyStr = webClient.get()
-                .uri("/api/users/{username}/public-key", contact)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
-
-        return KeyFactory.getInstance(algorithm)
-                .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(keyStr)));
-    }
-
-    private void showAlert(String title, String message) {
-        Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle(title);
-            alert.setContentText(message);
-            alert.show();
-        });
-    }
 
 
 
-
-
-
-
-
-
-    private static final int GCM_IV_LENGTH = 12; // 96 bits for GCM
-    private static final int GCM_TAG_LENGTH = 16 * 8; // 128-bit authentication tag
 
     private byte[] encryptMessage(String plaintext, SecretKey key) throws GeneralSecurityException {
         byte[] iv = new byte[12];
@@ -548,52 +493,6 @@ public class MainGUI extends Application {
     private String getSelectedContact() {
         return contactList.getSelectionModel().getSelectedItem();
     }
-
-
-
-
-    private byte[] computeSharedSecret(String algorithm, Object instance, String partnerKey)
-            throws Exception {
-        switch (algorithm) {
-            case "Diffie-Hellman": {
-                DiffieHellmanExample dh = (DiffieHellmanExample) instance;
-                PublicKey dhPub = KeyFactory.getInstance("DH")
-                        .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(partnerKey)));
-                dh.performKeyExchange(dhPub);
-                return dh.getSharedSecret();
-            }
-            case "ECDH": {
-                ECDiffieHellmanExample ecdh = (ECDiffieHellmanExample) instance;
-                PublicKey ecPub = KeyFactory.getInstance("EC")
-                        .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(partnerKey)));
-                ecdh.performKeyExchange(ecPub);
-                return ecdh.getSharedSecret();
-            }
-            case "Manual DH": {
-                ManualDiffieHellman manualDH = (ManualDiffieHellman) instance;
-                BigInteger dhPublic = new BigInteger(partnerKey);
-                manualDH.computeSharedSecret(dhPublic);
-                return manualDH.getSharedSecret();
-            }
-            case "Manual ECDH": {
-                ManualECDiffieHellman ecdhImp = (ManualECDiffieHellman) instance;
-                // partnerKey is hex string of uncompressed point 04||X||Y
-                byte[] raw = hexStringToByteArray(partnerKey);
-                if (raw[0] != 0x04 || raw.length != 65) {
-                    throw new IllegalArgumentException("Invalid EC public key format");
-                }
-                byte[] xb = Arrays.copyOfRange(raw, 1, 33);
-                byte[] yb = Arrays.copyOfRange(raw, 33, 65);
-                BigInteger x = new BigInteger(1, xb), y = new BigInteger(1, yb);
-                ManualECDiffieHellman.ECPointAffine pt = new ManualECDiffieHellman.ECPointAffine(x, y);
-                ecdhImp.computeSharedSecret(pt);
-                return ecdhImp.getSharedSecret();
-            }
-            default:
-                throw new IllegalArgumentException("Invalid algorithm");
-        }
-    }
-
 
 
     private SecretKey deriveAESKey(byte[] sharedSecret) {
