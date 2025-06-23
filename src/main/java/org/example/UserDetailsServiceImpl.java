@@ -25,7 +25,7 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
         return new org.springframework.security.core.userdetails.User(
                 user.getUsername(),
-                "", // password not used in key-based auth
+                "",
                 Collections.emptyList()
         );
     }

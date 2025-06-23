@@ -6,6 +6,7 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+// kompatybilność
 
 public class ManualECDiffieHellman {
     // using curve P-256 parameters (secp256r1)

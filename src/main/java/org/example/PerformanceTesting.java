@@ -144,7 +144,7 @@ public class PerformanceTesting {
         }
     }
 
-    // AES-GCM helper methods
+    // to samo co w maingui
     private static byte[] encryptMessage(String plaintext, SecretKey key) throws Exception {
         byte[] iv = new byte[12];
         RANDOM.nextBytes(iv);
@@ -163,7 +163,6 @@ public class PerformanceTesting {
         return new String(plain, StandardCharsets.UTF_8);
     }
 
-    // Helper to decode hex strings
     private static byte[] hexStringToBytes(String s) {
         int len = s.length();
         byte[] data = new byte[len / 2];

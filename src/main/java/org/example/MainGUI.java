@@ -204,7 +204,7 @@ public class MainGUI extends Application {
 
         // TODO: non-fixed kontakty
         // Contact List
-        contactList = new ListView<>(FXCollections.observableArrayList("Alice", "Bob"));
+        contactList = new ListView<>(FXCollections.observableArrayList("Alice", "Bob", "Eve"));
         contactList.getSelectionModel().selectedItemProperty().addListener(
                 (obs, old, newContact) -> handleContactSelection(newContact)
         );
