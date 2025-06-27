@@ -19,6 +19,9 @@ public class Message {
 
     @Column(nullable = false)
     private String recipientUsername;
+    // nowa kolumna: typ wiadomości
+    @Column(nullable = false)
+    private String messageType; // np. "TEXT" lub "CTRL"
 
     @Column(length = 4096, nullable = false)
     private String ciphertext;
@@ -39,6 +42,10 @@ public class Message {
     public void setId(UUID id) {
         this.id = id;
     }
+
+    public String getMessageType() { return messageType; }
+    public void setMessageType(String messageType) { this.messageType = messageType; }
+
 
     public String getSenderUsername() {
         return senderUsername;

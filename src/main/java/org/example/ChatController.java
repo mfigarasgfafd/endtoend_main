@@ -1,5 +1,6 @@
 package org.example;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,11 +21,13 @@ public class ChatController {
     // No changes needed to controller structure
     private final ChatService chatService;
     private final UserRepository userRepository;
+    private final ObjectMapper objectMapper;
 
-    public ChatController(ChatService chatService,
-                          UserRepository userRepository) {
+
+    public ChatController(ChatService chatService, UserRepository userRepository, ObjectMapper objectMapper) {
         this.chatService = chatService;
         this.userRepository = userRepository;
+        this.objectMapper = objectMapper;
     }
 
     // Existing endpoints remain identical
@@ -47,30 +50,28 @@ public class ChatController {
     }
 
     @PostMapping("/messages")
-    public ResponseEntity<Void> receiveMessage(
-            @RequestBody MessageRequest req,
-            @RequestHeader("Authorization") String authHeader
-    ) {
-        // Verify Basic‐Auth user matches the sender field
-        String authUsername = extractUsername(authHeader);
-        if (!authUsername.equals(req.sender())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sender mismatch");
+    public ResponseEntity<Void> receiveMessage(@RequestBody MessageRequest request,
+                                               @RequestHeader("Authorization") String authHeader) {
+        // weryfikacja użytkownika (verifyUser) jak poprzednio...
+        User user = verifyUser(authHeader);
+        if (!user.getUsername().equals(request.sender())) {
+            return ResponseEntity.status(403).build();
         }
-
-        // Ensure recipient exists
-        if (!userRepository.existsByUsername(req.recipient())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recipient not found");
+        // Możesz dodatkowo sprawdzić poprawność pola type:
+        String type = request.type();
+        if (!"TEXT".equals(type) && !"CTRL".equals(type)) {
+            return ResponseEntity.badRequest().build();
         }
-
-        // Persist
-        chatService.sendMessage(
-                req.sender(),
-                req.recipient(),
-                req.ciphertext(),
-                req.iv()
-        );
+        // Zapisz wiadomość
+        chatService.sendMessage(request.sender(),
+                request.recipient(),
+                request.type(),
+                request.ciphertext(),
+                request.iv());
         return ResponseEntity.ok().build();
     }
+
+
     private String extractUsername(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Basic ")) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
@@ -81,16 +82,31 @@ public class ChatController {
     }
 
     @GetMapping("/messages/{username}")
-    public List<Message> getMessages(
-            @PathVariable String username,
-            @RequestHeader("Authorization") String authHeader
-    ) {
-        String authUsername = extractUsername(authHeader);
-        if (!authUsername.equals(username)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not your messages");
+    public ResponseEntity<List<Message>> getMessages(@PathVariable String username,
+                                                     @RequestHeader("Authorization") String authHeader) {
+        User user = verifyUser(authHeader);
+        if (!user.getUsername().equals(username)) {
+            return ResponseEntity.status(403).build();
         }
-        return chatService.getUndeliveredMessages(username);
+        List<Message> messages = chatService.getUndeliveredMessages(username);
+        return ResponseEntity.ok(messages);
     }
+
+
+    // Endpoint do usuwania public key
+    @DeleteMapping("/users/{username}/public-key")
+    public ResponseEntity<Void> deletePublicKey(@PathVariable String username,
+                                                @RequestHeader("Authorization") String authHeader) {
+        User user = verifyUser(authHeader);
+        if (!user.getUsername().equals(username)) {
+            return ResponseEntity.status(403).build();
+        }
+        user.setPublicKey("");
+        userRepository.save(user);
+        return ResponseEntity.ok().build();
+    }
+
+
 
 
     @PutMapping(
@@ -130,6 +146,8 @@ public class ChatController {
     public ResponseEntity<Boolean> userExists(@PathVariable("username") String username) { // Explicit path variable name
         return ResponseEntity.ok(userRepository.existsByUsername(username));
     }
+
+
 
     private User verifyUser(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Basic ")) {

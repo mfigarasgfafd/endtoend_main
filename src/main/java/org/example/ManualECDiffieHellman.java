@@ -124,11 +124,11 @@ public class ManualECDiffieHellman {
     }
 
     // ======== COORDINATES =========
-    static class ECPointAffine {
+    public static class ECPointAffine {
         final BigInteger x,y; final boolean infinity;
-        ECPointAffine(BigInteger x,BigInteger y){this.x=x;this.y=y;this.infinity=false;}
+        public ECPointAffine(BigInteger x, BigInteger y){this.x=x;this.y=y;this.infinity=false;}
         private ECPointAffine(){this.x=this.y=null;this.infinity=true;}
-        static final ECPointAffine INF=new ECPointAffine();
+        public static final ECPointAffine INF=new ECPointAffine();
         ECPointJacobian toJacobian(){return infinity?ECPointJacobian.INF:new ECPointJacobian(x,y,BigInteger.ONE);}
     }
 

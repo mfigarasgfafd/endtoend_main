@@ -43,46 +43,48 @@ public class ChatClient {
                 .block();
     }
 
-    public void sendMessage(String recipientUsername, String message) {
-        try {
-            // Get recipient's public key
-            User recipient = webClient.get()
-                    .uri("/api/users?username={username}", recipientUsername)
-                    .retrieve()
-                    .bodyToMono(User.class)
-                    .block();
+//    public void sendMessage(String recipientUsername, String message) {
+//        try {
+//            // Get recipient's public key
+//            User recipient = webClient.get()
+//                    .uri("/api/users?username={username}", recipientUsername)
+//                    .retrieve()
+//                    .bodyToMono(User.class)
+//                    .block();
+//
+//            if (recipient == null) {
+//                System.err.println("Recipient not found: " + recipientUsername);
+//                return;
+//            }
+//
+//            // Perform key exchange
+//            byte[] sharedSecret = computeSharedSecret(
+//                    recipient.getPublicKey(),
+//                    this.keyExchangeAlgorithm
+//            );
+//
+//            // Encrypt message
+//            CipherResult encrypted = encryptMessage(message, sharedSecret);
+//
+//            // Send to backend - UUID to String
+//            webClient.post()
+//                    .uri("/api/messages")
+//                    .bodyValue(new MessageRequest(
+//                            this.localUser.getUserId().toString(),  // Convert UUID to String
+//                            recipient.getUserId().toString(),       // Convert UUID to String
+//                            encrypted.ciphertext(),
+//                            encrypted.iv()
+//                    ))
+//                    .retrieve()
+//                    .bodyToMono(Void.class)
+//                    .block();
+//
+//        } catch (Exception e) {
+//            System.err.println("Message send failed: " + e.getMessage());
+//        }
+//    }
 
-            if (recipient == null) {
-                System.err.println("Recipient not found: " + recipientUsername);
-                return;
-            }
 
-            // Perform key exchange
-            byte[] sharedSecret = computeSharedSecret(
-                    recipient.getPublicKey(),
-                    this.keyExchangeAlgorithm
-            );
-
-            // Encrypt message
-            CipherResult encrypted = encryptMessage(message, sharedSecret);
-
-            // Send to backend - UUID to String
-            webClient.post()
-                    .uri("/api/messages")
-                    .bodyValue(new MessageRequest(
-                            this.localUser.getUserId().toString(),  // Convert UUID to String
-                            recipient.getUserId().toString(),       // Convert UUID to String
-                            encrypted.ciphertext(),
-                            encrypted.iv()
-                    ))
-                    .retrieve()
-                    .bodyToMono(Void.class)
-                    .block();
-
-        } catch (Exception e) {
-            System.err.println("Message send failed: " + e.getMessage());
-        }
-    }
     private KeyPair generateKeyPair(String algorithm) {
         try {
             KeyPairGenerator kpg;

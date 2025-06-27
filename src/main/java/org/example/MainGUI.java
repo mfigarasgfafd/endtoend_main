@@ -1,5 +1,8 @@
 package org.example;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -70,6 +73,12 @@ public class MainGUI extends Application {
     private final Map<String, ManualECDiffieHellman> manualEcdhInstances = new ConcurrentHashMap<>();
     // Library ECDH
     private final Map<String, KeyPair> ecdhLibKeyPairs   = new ConcurrentHashMap<>();
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    // negocjacja
+    private Map<String, Boolean> awaitingAlgorithmConfirmation = new ConcurrentHashMap<>();
+    private Map<String, String> contactAlgorithm = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
         launch(args);
@@ -165,33 +174,184 @@ public class MainGUI extends Application {
         poller.play();
     }
 
-    private void processIncomingMessages(List<Message> messages) {
-        if (messages == null) return;
+//    private void processIncomingMessages(List<Message> messages) {
+//        if (messages == null) return;
+//
+//        messages.forEach(msg -> {
+//            try {
+//                // 1) pull out sender username
+//                String sender = msg.getSenderUsername();
+//
+//                // 2) look up the shared AES key you derived for contact
+//                SecretKey key = sharedSecrets.get(sender);
+//                if (key == null) {
+//                    throw new IllegalStateException(
+//                            "No shared secret for " + sender + "; perform key exchange first");
+//                }
+//
+//                // 3) decrypt the Base64‐encoded iv & ciphertext
+//                String decrypted = decryptMessage(msg, key);
+//
+//                // 4) update the UI
+//                updateChat(sender, decrypted, false);
+//            } catch (Exception e) {
+//                updateChat("System", "Decryption error: " + e.getMessage(), false);
+//            }
+//        });
+//    }
 
-        messages.forEach(msg -> {
-            try {
-                // 1) pull out sender username
-                String sender = msg.getSenderUsername();
+    private void handleControlPayload(String sender, String payloadJson) {
+        try {
+            JsonNode node = objectMapper.readTree(payloadJson);
+            String action = node.path("action").asText(null);
+            if ("KEY_EXCHANGE_PROPOSAL".equals(action)) {
+                String newAlg = node.get("algorithm").asText();
+                // Pytamy użytkownika przez dialog
+                Platform.runLater(() -> promptAlgorithmChange(sender, newAlg));
+            } else if ("KEY_EXCHANGE_RESPONSE".equals(action)) {
+                String alg = node.get("algorithm").asText();
+                boolean accepted = node.get("accepted").asBoolean();
+                handleKeyExchangeResponse(sender, alg, accepted);
+            } else {
+                updateChat("System", "Nieznana akcja kontrolna od " + sender + ": " + action, false);
+            }
+        } catch (Exception e) {
+            updateChat("System", "Błąd parsowania control payload: " + e.getMessage(), false);
+        }
+    }
 
-                // 2) look up the shared AES key you derived for contact
-                SecretKey key = sharedSecrets.get(sender);
-                if (key == null) {
-                    throw new IllegalStateException(
-                            "No shared secret for " + sender + "; perform key exchange first");
-                }
+    private void promptAlgorithmChange(String sender, String newAlg) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Propozycja wymiany klucza");
+        alert.setHeaderText(sender + " proponuje wymianę klucza algorytmem: " + newAlg);
+        alert.setContentText("Czy akceptujesz?");
+        alert.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                // 1) Wyślij potwierdzenie
+                sendKeyExchangeConfirmation(sender, newAlg, true);
 
-                // 3) decrypt the Base64‐encoded iv & ciphertext
-                String decrypted = decryptMessage(msg, key);
+                cleanupKeyExchangeState(sender);
 
-                // 4) update the UI
-                updateChat(sender, decrypted, false);
-            } catch (Exception e) {
-                updateChat("System", "Decryption error: " + e.getMessage(), false);
+                // 2) Ustaw stan lokalny
+                contactAlgorithm.put(sender, newAlg);
+                sharedSecrets.remove(sender);
+                // 3) Usuń stary public key po stronie serwera
+                webClient.delete().uri("/api/users/{u}/public-key", currentUser)
+                        .retrieve().toBodilessEntity().block();
+                // 4) Synchronizuj ChoiceBox
+                Platform.runLater(() -> algorithmChoice.setValue(newAlg));
+                cleanupKeyExchangeState(sender);
+
+                // 5) Natychmiastowy handshake B→A
+                startKeyExchangeWithAlgorithm(sender, newAlg);
+                updateChat("System", "Rozpoczęto wymianę klucza algorytmem " + newAlg, false);
+            } else {
+                sendKeyExchangeConfirmation(sender, newAlg, false);
+                updateChat("System", "Odrzucono wymianę klucza algorytmem " + newAlg, false);
             }
         });
     }
 
+    private void cleanupKeyExchangeState(String contact) {
+        // Clear shared secrets
+        sharedSecrets.remove(contact);
+
+        // Clear all key exchange instances
+        manualDhInstances.remove(contact);
+        dhLibKeyPairs.remove(contact);
+        manualEcdhInstances.remove(contact);
+        ecdhLibKeyPairs.remove(contact);
+
+        // Clear pending states
+        awaitingAlgorithmConfirmation.remove(contact);
+
+        // Remove public key from server with retries
+        int attempts = 0;
+        while (attempts < 3) {
+            try {
+                Boolean deleted = webClient.delete()
+                        .uri("/api/users/{u}/public-key", currentUser)
+                        .retrieve()
+                        .bodyToMono(Boolean.class)
+                        .block(java.time.Duration.ofSeconds(2));  // Fixed
+
+                if (Boolean.TRUE.equals(deleted)) break;
+            } catch (Exception e) {
+                log.warn("Key delete attempt {} failed: {}", attempts + 1, e.getMessage());
+            }
+            attempts++;
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+        }
+    }
+
+    private void handleKeyExchangeResponse(String sender, String alg, boolean accepted) {
+        Boolean awaiting = awaitingAlgorithmConfirmation.get(sender);
+        if (awaiting != null && awaiting) {
+            if (accepted) {
+                // Ustaw nowy algorytm w stanie lokalnym
+                contactAlgorithm.put(sender, alg);
+                sharedSecrets.remove(sender);
+                cleanupKeyExchangeState(sender);
+                // Usuń stary public key
+                webClient.delete().uri("/api/users/{u}/public-key", currentUser)
+                        .retrieve().toBodilessEntity().block();
+                // Synchronizuj ChoiceBox
+                Platform.runLater(() -> algorithmChoice.setValue(alg));
+                // Handshake A→B
+                startKeyExchangeWithAlgorithm(sender, alg);
+                updateChat("System", "Partner zaakceptował. Rozpoczynam wymianę klucza algorytmem " + alg, false);
+            } else {
+                updateChat("System", "Partner odrzucił zmianę algorytmu na " + alg, false);
+            }
+            awaitingAlgorithmConfirmation.remove(sender);
+        } else {
+            updateChat("System", "Otrzymano nieoczekiwane potwierdzenie od " + sender, false);
+        }
+    }
+
+
+    private void sendKeyExchangeConfirmation(String contact, String algorithm, boolean accepted) {
+        try {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("action", "KEY_EXCHANGE_RESPONSE");
+            node.put("algorithm", algorithm);
+            node.put("accepted", accepted);
+            String json = objectMapper.writeValueAsString(node);
+
+            String ciphertext, iv;
+            SecretKey key = sharedSecrets.get(contact);
+            if (key != null) {
+                byte[] encrypted = encryptMessage(json, key);
+                EncryptedMessage em = EncryptedMessage.fromBytes(encrypted);
+                ciphertext = em.ciphertext();
+                iv = em.iv();
+            } else {
+                ciphertext = json;
+                iv = "";
+            }
+            MessageRequest req = new MessageRequest(currentUser, contact, "CTRL", ciphertext, iv);
+            webClient.post().uri("/api/messages").bodyValue(req).retrieve().toBodilessEntity().block();
+        } catch (Exception e) {
+            Platform.runLater(() ->
+                    updateChat("System", "Błąd wysłania potwierdzenia: " + e.getMessage(), false));
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     private void updateChat(String sender, String message, boolean isOutgoing) {
+        System.out.println("\n\n\n\n\n\nasdfasddsa");
         Platform.runLater(() ->
                 chatList.getItems().add((isOutgoing ? "You: " : sender + ": ") + message)
         );
@@ -222,7 +382,9 @@ public class MainGUI extends Application {
 
         // buttons
         Button exchangeBtn = new Button("Start Key Exchange");
-        exchangeBtn.setOnAction(e -> startKeyExchange());
+        exchangeBtn.setOnAction(
+                e -> startKeyExchange()
+        );
 
         Button sendBtn = new Button("Send");
         sendBtn.setOnAction(e -> sendMessage());
@@ -244,13 +406,84 @@ public class MainGUI extends Application {
 
     private void handleContactSelection(String contact) {
         if (contact != null) {
+            // Reset UI state
             chatList.getItems().clear();
+
+            // Reset to default algorithm for this contact
+            algorithmChoice.setValue("Manual ECDH");
+
+            // Clear any partial key exchange state
+            cleanupKeyExchangeState(contact);
+
+            // Enable messaging
             messageInput.setDisable(false);
         }
     }
 
 
+    private void sendTextMessage(String contact, String plaintext) {
+        try {
+            SecretKey key = sharedSecrets.get(contact);
+            String type = "TEXT";
+            String ciphertextB64;
+            String ivB64;
+            if (key != null) {
+                byte[] encrypted = encryptMessage(plaintext, key);
+                EncryptedMessage msg = EncryptedMessage.fromBytes(encrypted);
+                ciphertextB64 = msg.ciphertext();
+                ivB64 = msg.iv();
+            } else {
+                // jeśli brak klucza, ewentualnie nie pozwól wysłać plaintext, albo wyślij jawnie:
+                ciphertextB64 = plaintext; // lub zablokuj
+                ivB64 = "";
+            }
+            MessageRequest req = new MessageRequest(currentUser, contact, type, ciphertextB64, ivB64);
+            webClient.post()
+                    .uri("/api/messages")
+                    .bodyValue(req)
+                    .retrieve().toBodilessEntity().block();
+            updateChat("You", plaintext, true);
+        } catch (Exception e) {
+            updateChat("System", "Send failed: " + e.getMessage(), false);
+        }
+    }
 
+    private void processIncomingMessages(List<Message> messages) {
+        if (messages == null) return;
+        for (Message msg : messages) {
+            String sender = msg.getSenderUsername();
+            String type = msg.getMessageType();
+            if ("TEXT".equals(type)) {
+                String display;
+                try {
+                    if (msg.getIv() != null && !msg.getIv().isBlank()) {
+                        display = decryptMessage(msg, sharedSecrets.get(sender));
+                    } else {
+                        display = msg.getCiphertext(); // plaintext?
+                    }
+                } catch (Exception e) {
+                    display = "[Decrypt error: " + e.getMessage() + "]";
+                }
+                updateChat(sender, display, false);
+            }
+            else if ("CTRL".equals(type)) {
+                String payload;
+                try {
+                    if (msg.getIv() != null && !msg.getIv().isBlank()) {
+                        payload = decryptMessage(msg, sharedSecrets.get(sender));
+                    } else {
+                        payload = msg.getCiphertext();
+                    }
+                    handleControlPayload(sender, payload);
+                } catch (Exception e) {
+                    updateChat("System", "Control msg error: " + e.getMessage(), false);
+                }
+
+            } else {
+                updateChat("System", "Unknown message type from " + sender, false);
+            }
+        }
+    }
 
     private void startKeyExchange() {
         String contact = getSelectedContact();
@@ -258,32 +491,77 @@ public class MainGUI extends Application {
             updateChat("System", "Select a contact first!", false);
             return;
         }
-        String alg = algorithmChoice.getValue();
+        String chosenAlg = algorithmChoice.getValue();
+        // Wyślij propozycję
+        sendKeyExchangeProposal(contact, chosenAlg);
+        awaitingAlgorithmConfirmation.put(contact, true);
+        updateChat("System", "Propozycja wymiany klucza (algorytm: "
+                + chosenAlg + ") wysłana do " + contact, false);
+    }
+
+    private void sendKeyExchangeProposal(String contact, String newAlg) {
+        try {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("action", "KEY_EXCHANGE_PROPOSAL");
+            node.put("algorithm", newAlg);
+            String json = objectMapper.writeValueAsString(node);
+
+            String ciphertext, iv;
+            SecretKey key = sharedSecrets.get(contact);
+            if (key != null) {
+                byte[] encrypted = encryptMessage(json, key);
+                EncryptedMessage em = EncryptedMessage.fromBytes(encrypted);
+                ciphertext = em.ciphertext();
+                iv = em.iv();
+            } else {
+                ciphertext = json;
+                iv = "";
+            }
+            MessageRequest req = new MessageRequest(currentUser, contact, "CTRL", ciphertext, iv);
+            webClient.post().uri("/api/messages").bodyValue(req).retrieve().toBodilessEntity().block();
+        } catch (Exception e) {
+            Platform.runLater(() ->
+                    updateChat("System", "Błąd wysłania propozycji wymiany klucza: " + e.getMessage(), false));
+        }
+    }
+
+
+    private void startKeyExchangeWithAlgorithm(String contact, String alg) {
+        // Ensure fresh state before starting
+        cleanupKeyExchangeState(contact);
 
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
+                // Add delay to ensure server processes cleanup
+                Thread.sleep(300);
+
                 switch (alg) {
                     case "Manual DH":
-                        performManualDh(contact); break;
+                        performManualDh(contact);
+                        break;
                     case "DH":
-                        performDhWithLibrary(contact); break;
+                        performDhWithLibrary(contact);
+                        break;
                     case "Manual ECDH":
-                        performManualECDH(contact); break;
+                        performManualECDH(contact);
+                        break;
                     case "ECDH":
-                        performEcdhWithLibrary(contact); break;
+                        performEcdhWithLibrary(contact);
+                        break;
                     default:
                         throw new IllegalStateException("Unknown algorithm: " + alg);
                 }
                 Platform.runLater(() ->
-                        updateChat("System", "Key exchange with " + contact + " successful!", false)
-                );
+                        updateChat("System", "Key exchange (" + alg + ") with " + contact + " successful!", false));
             } catch (Exception e) {
                 Platform.runLater(() ->
-                        updateChat("System", "Key exchange failed: " + e.getMessage(), false)
-                );
+                        updateChat("System", "Key exchange (" + alg + ") failed: " + e.getMessage(), false));
             }
         });
     }
+
+
+
 
 
     private void performManualECDH(String contact) throws Exception {
@@ -316,6 +594,8 @@ public class MainGUI extends Application {
         SecretKey aes = new SecretKeySpec(secret, 0, 16, "AES");
         sharedSecrets.put(contact, aes);
     }
+
+
     private String pollForPublicKey(String contact) throws InterruptedException {
         for (int i = 0; i < 20; i++) {
             String val = webClient.get()
@@ -416,22 +696,50 @@ public class MainGUI extends Application {
             try {
                 KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
                 g.initialize(new ECGenParameterSpec("secp256r1"));
-                KeyPair pair = g.generateKeyPair();
-                String pubB64 = Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
-                webClient.put()
-                        .uri(b -> b.path("/api/users/{u}/public-key").build(currentUser))
-                        .bodyValue(pubB64)
-                        .retrieve().toBodilessEntity().block();
-                return pair;
+                return g.generateKeyPair();
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
             }
         });
 
-        // 2) poll partner
-        String partnerB64 = pollForKey(contact);
+        // 2) upload public key
+        String pubB64 = Base64.getEncoder().encodeToString(kp.getPublic().getEncoded());
+        webClient.put()
+                .uri(b -> b.path("/api/users/{u}/public-key").build(currentUser))
+                .bodyValue(pubB64)
+                .retrieve().toBodilessEntity().block();
 
-        // 3) reconstruct and agree
+        // 3) poll partner with format validation
+        String partnerB64 = null;
+        for (int i = 0; i < 30; i++) {  // Increased timeout to 9 seconds
+            String candidate = webClient.get()
+                    .uri(b -> b.path("/api/users/{u}/public-key").build(contact))
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block(java.time.Duration.ofMillis(300));  // Fixed
+
+            if (candidate != null && !candidate.isBlank()) {
+                // Validate base64 format
+                if (candidate.matches("^[a-zA-Z0-9+/]+={0,2}$")) {
+                    partnerB64 = candidate;
+                    break;
+                } else {
+                    log.warn("Invalid base64 key format from {}", contact);
+                }
+            }
+            Thread.sleep(300);
+        }
+
+        if (partnerB64 == null) {
+            throw new RuntimeException("Timed out waiting for valid public key from " + contact);
+        }
+
+        // 4) reconstruct and agree
+        partnerB64 = partnerB64.trim();
+        if (partnerB64.length() % 4 != 0) {
+            partnerB64 = partnerB64 + "=".repeat(4 - partnerB64.length() % 4);
+        }
+
         byte[] decoded = Base64.getDecoder().decode(partnerB64);
         PublicKey partnerKey = KeyFactory.getInstance("EC")
                 .generatePublic(new X509EncodedKeySpec(decoded));
@@ -512,34 +820,48 @@ public class MainGUI extends Application {
     private void sendMessage() {
         String message = messageInput.getText();
         String contact = getSelectedContact();
-
         if (message.isEmpty() || contact == null) return;
 
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
                 SecretKey key = sharedSecrets.get(contact);
-                if (key == null) throw new Exception("Perform key exchange first");
+                String type = "TEXT";
+                String ciphertextB64;
+                String ivB64;
+                if (key != null) {
+                    // szyfrujemy tekst
+                    byte[] encrypted = encryptMessage(message, key);
+                    EncryptedMessage msg = EncryptedMessage.fromBytes(encrypted);
+                    ciphertextB64 = msg.ciphertext();
+                    ivB64 = msg.iv();
+                } else {
+                    // brak wspólnego klucza - nie powinniśmy wysyłać plaintext
+                    Platform.runLater(() ->
+                            updateChat("System", "Nie wykonano wymiany klucza – nie można wysłać wiadomości", false));
+                    return;
+                }
 
-                byte[] encrypted = encryptMessage(message, key);
-                EncryptedMessage msg = EncryptedMessage.fromBytes(encrypted);
-
+                MessageRequest req = new MessageRequest(
+                        currentUser,
+                        contact,
+                        type,
+                        ciphertextB64,
+                        ivB64
+                );
                 webClient.post()
                         .uri("/api/messages")
-                        .bodyValue(new MessageRequest(
-                                currentUser, contact, msg.ciphertext(), msg.iv()))
+                        .bodyValue(req)
                         .retrieve()
                         .toBodilessEntity()
                         .block();
 
                 Platform.runLater(() -> updateChat("You", message, true));
             } catch (Exception e) {
-                Platform.runLater(() -> updateChat(
-                        "System", "Send failed: " + e.getMessage(), false));
+                Platform.runLater(() ->
+                        updateChat("System", "Send failed: " + e.getMessage(), false));
             }
         });
     }
-
-
 
 
 }
