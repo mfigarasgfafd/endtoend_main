@@ -566,7 +566,14 @@ public class MainGUI extends Application {
 
     private void performManualECDH(String contact) throws Exception {
         ManualECDiffieHellman ecdh = manualEcdhInstances.computeIfAbsent(contact, c -> {
-            ManualECDiffieHellman inst = new ManualECDiffieHellman();
+            ManualECDiffieHellman inst = null;
+            try {
+                inst = new ManualECDiffieHellman();
+                // todo: test tylko pozniej delete
+                inst.setKeySize(512);
+            } catch (InvalidKeyException e) {
+                throw new RuntimeException(e);
+            }
             try {
                 inst.generateKeyPair();
                 // Publish public key

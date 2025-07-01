@@ -12,7 +12,6 @@ import java.security.spec.ECGenParameterSpec;
 
 
 
-// KLASA DO TESTOWANIA
 
 @SpringBootApplication
 public class SecureChatApplication {
