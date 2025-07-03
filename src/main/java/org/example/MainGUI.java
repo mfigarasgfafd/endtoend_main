@@ -174,31 +174,7 @@ public class MainGUI extends Application {
         poller.play();
     }
 
-//    private void processIncomingMessages(List<Message> messages) {
-//        if (messages == null) return;
-//
-//        messages.forEach(msg -> {
-//            try {
-//                // 1) pull out sender username
-//                String sender = msg.getSenderUsername();
-//
-//                // 2) look up the shared AES key you derived for contact
-//                SecretKey key = sharedSecrets.get(sender);
-//                if (key == null) {
-//                    throw new IllegalStateException(
-//                            "No shared secret for " + sender + "; perform key exchange first");
-//                }
-//
-//                // 3) decrypt the Base64‐encoded iv & ciphertext
-//                String decrypted = decryptMessage(msg, key);
-//
-//                // 4) update the UI
-//                updateChat(sender, decrypted, false);
-//            } catch (Exception e) {
-//                updateChat("System", "Decryption error: " + e.getMessage(), false);
-//            }
-//        });
-//    }
+
 
     private void handleControlPayload(String sender, String payloadJson) {
         try {
@@ -297,7 +273,7 @@ public class MainGUI extends Application {
                         .retrieve().toBodilessEntity().block();
                 // Synchronizuj ChoiceBox
                 Platform.runLater(() -> algorithmChoice.setValue(alg));
-                // Handshake A→B
+                // Handshake A -> B
                 startKeyExchangeWithAlgorithm(sender, alg);
                 updateChat("System", "Partner zaakceptował. Rozpoczynam wymianę klucza algorytmem " + alg, false);
             } else {
@@ -336,17 +312,6 @@ public class MainGUI extends Application {
                     updateChat("System", "Błąd wysłania potwierdzenia: " + e.getMessage(), false));
         }
     }
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -421,32 +386,7 @@ public class MainGUI extends Application {
     }
 
 
-    private void sendTextMessage(String contact, String plaintext) {
-        try {
-            SecretKey key = sharedSecrets.get(contact);
-            String type = "TEXT";
-            String ciphertextB64;
-            String ivB64;
-            if (key != null) {
-                byte[] encrypted = encryptMessage(plaintext, key);
-                EncryptedMessage msg = EncryptedMessage.fromBytes(encrypted);
-                ciphertextB64 = msg.ciphertext();
-                ivB64 = msg.iv();
-            } else {
-                // jeśli brak klucza, ewentualnie nie pozwól wysłać plaintext, albo wyślij jawnie:
-                ciphertextB64 = plaintext; // lub zablokuj
-                ivB64 = "";
-            }
-            MessageRequest req = new MessageRequest(currentUser, contact, type, ciphertextB64, ivB64);
-            webClient.post()
-                    .uri("/api/messages")
-                    .bodyValue(req)
-                    .retrieve().toBodilessEntity().block();
-            updateChat("You", plaintext, true);
-        } catch (Exception e) {
-            updateChat("System", "Send failed: " + e.getMessage(), false);
-        }
-    }
+
 
     private void processIncomingMessages(List<Message> messages) {
         if (messages == null) return;
@@ -567,13 +507,8 @@ public class MainGUI extends Application {
     private void performManualECDH(String contact) throws Exception {
         ManualECDiffieHellman ecdh = manualEcdhInstances.computeIfAbsent(contact, c -> {
             ManualECDiffieHellman inst = null;
-            try {
-                inst = new ManualECDiffieHellman();
-                // todo: test tylko pozniej delete
-                inst.setKeySize(512);
-            } catch (InvalidKeyException e) {
-                throw new RuntimeException(e);
-            }
+            inst = new ManualECDiffieHellman();
+//                inst.setKeySize(512);
             try {
                 inst.generateKeyPair();
                 // Publish public key

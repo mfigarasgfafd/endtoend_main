@@ -4,6 +4,8 @@ import javax.crypto.KeyAgreement;
 import java.security.*;
 import java.util.Base64;
 
+
+// testing - unused, library implementation is located in maingui
 public class DiffieHellmanExample {
     private KeyPair keyPair;
     private byte[] sharedSecret;

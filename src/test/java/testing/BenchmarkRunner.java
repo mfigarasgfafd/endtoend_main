@@ -1,7 +1,7 @@
 package testing;
 
 import org.example.ManualDiffieHellman;
-import org.example.ManualECDiffieHellman;
+import org.example.ManualECDiffieHellmanBenchmarking;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.results.format.ResultFormatType;
@@ -55,16 +55,16 @@ public class BenchmarkRunner {
         @Param({"160", "256", "384"})
         public int keySize;
 
-        ManualECDiffieHellman alice;
-        ManualECDiffieHellman bob;
+        ManualECDiffieHellmanBenchmarking alice;
+        ManualECDiffieHellmanBenchmarking bob;
 
         @Setup(Level.Trial)
         public void setup() throws Exception {
-            alice = new ManualECDiffieHellman();
+            alice = new ManualECDiffieHellmanBenchmarking();
             alice.setKeySize(keySize);
             alice.generateKeyPair();
 
-            bob = new ManualECDiffieHellman();
+            bob = new ManualECDiffieHellmanBenchmarking();
             bob.setKeySize(keySize);
             bob.generateKeyPair();
         }

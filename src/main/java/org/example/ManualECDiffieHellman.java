@@ -3,441 +3,201 @@ package org.example;
 import java.math.BigInteger;
 import java.security.InvalidKeyException;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+// kompatybilność
 
 public class ManualECDiffieHellman {
-    // Instance curve parameters (default secp256r1)
-    private static BigInteger P;
-    private static BigInteger A;
-    private BigInteger B;
-    private BigInteger N;
-    private ECPointJacobian G;
+    // using curve P-256 parameters (secp256r1)
+    private static final BigInteger P = new BigInteger("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16);
+    private static final BigInteger A = new BigInteger("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFC", 16);
+    private static final BigInteger B = new BigInteger("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B", 16);
+    private static final BigInteger N = new BigInteger("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16);
+    private static final ECPointAffine G = new ECPointAffine(
+            new BigInteger("6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296", 16),
+            new BigInteger("4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5", 16)
+    );
 
-    // Instance state
     private BigInteger d;
     private ECPointAffine Q;
     private byte[] shared;
-    private int keySize = 256; // Default key size
-
     private final SecureRandom rnd = new SecureRandom();
-    private PointArithmeticWorkspace workspace;
 
-    // ===== HKDF reuse fields =====
-    private static final Mac HKDF_MAC;
-    static {
-        try {
-            HKDF_MAC = Mac.getInstance("HmacSHA256");
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-    private byte[] saltBytes;    // all-zero salt
-    private byte[] prkBytes;     // holds PRK
-    private byte[] tBytes;       // temp buffer
-    private byte[] okmBytes;     // output keying material
-    private SecretKeySpec saltKeySpec;
-    private SecretKeySpec prkKeySpec;
-
-    public ManualECDiffieHellman() throws InvalidKeyException {
-        setKeySize(256); // Initialize with default curve
-    }
-
-    public void setKeySize(int keySize) throws InvalidKeyException {
-        if (keySize != 160 && keySize != 256 && keySize != 384 && keySize != 512) {
-            throw new InvalidKeyException("Unsupported key size. Use 160, 256, 384, or 512.");
-        }
-        this.keySize = keySize;
-        resetState();
-        initializeCurve();
-        initializeBuffers();
-        workspace = new PointArithmeticWorkspace(P);
-    }
-
-    private void resetState() {
-        d = null;
-        Q = null;
-        shared = null;
-    }
-
-    private void initializeCurve() throws InvalidKeyException {
-        switch (keySize) {
-            case 160:
-                P = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFF", 16);
-                A = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7FFFFFFC", 16);
-                B = new BigInteger("1C97BEFC54BD7A8B65ACF89F81D4D4ADC565FA45", 16);
-                N = new BigInteger("100000000000000000001F4C8F927AED3CA752257", 16);
-                G = new ECPointJacobian(
-                        new BigInteger("4A96B5688EF573284664698968C38BB913CBFC82", 16),
-                        new BigInteger("23A628553168947D59DCC912042351377AC5FB32", 16),
-                        BigInteger.ONE
-                );
-                break;
-            case 256:
-                P = new BigInteger("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16);
-                A = new BigInteger("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFC", 16);
-                B = new BigInteger("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B", 16);
-                N = new BigInteger("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16);
-                G = new ECPointJacobian(
-                        new BigInteger("6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296", 16),
-                        new BigInteger("4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5", 16),
-                        BigInteger.ONE
-                );
-                break;
-            case 384:
-                P = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFF0000000000000000FFFFFFFF", 16);
-                A = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFF0000000000000000FFFFFFFC", 16);
-                B = new BigInteger("B3312FA7E23EE7E4988E056BE3F82D19181D9C6EFE8141120314088F5013875AC656398D8A2ED19D2A85C8EDD3EC2AEF", 16);
-                N = new BigInteger("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC7634D81F4372DDF581A0DB248B0A77AECEC196ACCC52973", 16);
-                G = new ECPointJacobian(
-                        new BigInteger("AA87CA22BE8B05378EB1C71EF320AD746E1D3B628BA79B9859F741E082542A385502F25DBF55296C3A545E3872760AB7", 16),
-                        new BigInteger("3617DE4A96262C6F5D9E98BF9292DC29F8F41DBD289A147CE9DA3113B5F0B8C00A60B1CE1D7E819D7A431D7C90EA0E5F", 16),
-                        BigInteger.ONE
-                );
-                break;
-            case 512: // secp521r1
-                P = new BigInteger("01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", 16);
-                A = new BigInteger("01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC", 16);
-                B = new BigInteger("0051953EB9618E1C9A1F929A21A0B68540EEA2DA725B99B315F3B8B489918EF109E156193951EC7E937B1652C0BD3BB1BF073573DF883D2C34F1EF451FD46B503F00", 16);
-                N = new BigInteger("01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA51868783BF2F966B7FCC0148F709A5D03BB5C9B8899C47AEBB6FB71E91386409", 16);
-                G = new ECPointJacobian(
-                        new BigInteger("00C6858E06B70404E9CD9E3ECB662395B4429C648139053FB521F828AF606B4D3DBAA14B5E77EFE75928FE1DC127A2FFA8DE3348B3C1856A429BF97E7E31C2E5BD66", 16),
-                        new BigInteger("011839296A789A3BC0045C8A5FB42C7D1BD998F54449579B446817AFBD17273E662C97EE72995EF42640C550B9013FAD0761353C7086A272C24088BE94769FD16650", 16),
-                        BigInteger.ONE
-                );
-                break;
-            default:
-                throw new InvalidKeyException("Unsupported key size");
-        }
-    }
-
-    private void initializeBuffers() {
-        int numBytes = (P.bitLength() + 7) / 8;
-        saltBytes = new byte[numBytes]; // all-zero salt
-        prkBytes = new byte[32]; // PRK always 32 bytes for HmacSHA256
-        tBytes = new byte[32]; // temp buffer for HKDF
-        okmBytes = new byte[32]; // output fixed at 32 bytes
-        saltKeySpec = new SecretKeySpec(saltBytes, "HmacSHA256");
-        prkKeySpec = new SecretKeySpec(prkBytes, "HmacSHA256");
-    }
-
+    // Generate keypair with subgroup check
     public void generateKeyPair() throws InvalidKeyException {
-        // 1) random scalar in [1, N-1]
-        do {
-            d = new BigInteger(N.bitLength(), rnd);
-        } while (d.compareTo(BigInteger.ONE) < 0 || d.compareTo(N) >= 0);
-
-        // 2) compute Q = d·G
-        workspace.reset();
-        ECPointJacobian R = scalarMult(G, d);
-        Q = R.toAffine();
-
-        // 3) sanity check
-        if (!isOnCurve(Q)) {
-            throw new InvalidKeyException("Invalid public key");
-        }
+        // choose private key in [1, N-1]
+        do { d = new BigInteger(N.bitLength(), rnd); }
+        while (d.compareTo(BigInteger.ONE)<0 || d.compareTo(N.subtract(BigInteger.ONE))>0);
+        // compute Q = d*G
+        ECPointJacobian R = scalarMult(G.toJacobian(), d);
+        ECPointAffine cand = R.toAffine();
+        if (!isOnCurve(cand) || !inSubgroup(cand))
+            throw new InvalidKeyException("Invalid public key generated");
+        Q = cand;
     }
 
+    // compute shared secret and derive via HKDF-SHA256
     public void computeSharedSecret(ECPointAffine Ppub) throws InvalidKeyException {
-        if (!isOnCurve(Ppub)) {
-            throw new InvalidKeyException("Peer public key not on curve");
-        }
-
-        workspace.reset();
+        if (!isOnCurve(Ppub) || !inSubgroup(Ppub))
+            throw new InvalidKeyException("Invalid partner public key");
         ECPointJacobian R = scalarMult(Ppub.toJacobian(), d);
-        if (R.isInfinity()) {
-            throw new InvalidKeyException("Result is point at infinity");
-        }
-
         ECPointAffine S = R.toAffine();
-        int numBytes = (P.bitLength() + 7) / 8;
-        byte[] ikm = toBytes(S.x, numBytes);
-        shared = hkdfSha256(ikm, null, "ECDH shared secret".getBytes(), 32);
+        if (R.isInfinity())
+            throw new InvalidKeyException("Shared point at infinity");
+        // Derive a 256-bit key using HKDF-SHA256
+        byte[] ikm = to32(S.x);
+        byte[] salt = null;  // optional salt
+        byte[] info = "ECDH shared secret".getBytes();
+        this.shared = hkdfSha256(ikm, salt, info, 32);
     }
 
+    public String getPublicKey(){
+        byte[] xb=to32(Q.x), yb=to32(Q.y);
+        byte[] o=new byte[65]; o[0]=4; System.arraycopy(xb,0,o,1,32); System.arraycopy(yb,0,o,33,32);
+        return bytesToHex(o);
+    }
+    private byte[] to32(BigInteger v){byte[] b=v.toByteArray(); if(b.length==33&&b[0]==0) return Arrays.copyOfRange(b,1,33);
+        if(b.length<32){byte[] c=new byte[32];System.arraycopy(b,0,c,32-b.length,b.length);return c;}return b;}
+    private String bytesToHex(byte[]b){StringBuilder s=new StringBuilder();for(byte x:b)s.append(String.format("%02x",x));return s.toString();}
     public byte[] getSharedSecret() {
         return shared;
     }
 
-    public byte[] getPrivateKeyBytes() {
-        int numBytes = (P.bitLength() + 7) / 8;
-        return toBytes(d, numBytes);
-    }
+    // ========== PRIVATE HELPERS ===========
 
-    public byte[] getPublicKeyBytes() {
-        int numBytes = (P.bitLength() + 7) / 8;
-        byte[] xb = toBytes(Q.x, numBytes);
-        byte[] yb = toBytes(Q.y, numBytes);
-        byte[] o  = new byte[1 + 2 * numBytes];
-        o[0] = 4; // Uncompressed format
-        System.arraycopy(xb, 0, o, 1, numBytes);
-        System.arraycopy(yb, 0, o, 1 + numBytes, numBytes);
-        return o;
-    }
 
-    // ================= Scalar multiplication (Montgomery ladder style) ================
-    private ECPointJacobian scalarMult(ECPointJacobian P, BigInteger k) {
-        workspace.R0.set(ECPointJacobian.INF);
-        workspace.R1.set(P);
-
-        for (int i = k.bitLength() - 1; i >= 0; i--) {
-            if (k.testBit(i)) {
-                // R0 = R0 + R1;  R1 = 2*R1
-                workspace.R0.add(workspace.R1, workspace.T0, workspace.modArith);
-                workspace.R1.twice(workspace.T1, workspace.modArith);
-            } else {
-                // R1 = R1 + R0;  R0 = 2*R0
-                workspace.R1.add(workspace.R0, workspace.T0, workspace.modArith);
-                workspace.R0.twice(workspace.T1, workspace.modArith);
-            }
-            workspace.R0.set(workspace.T0);
-            workspace.R1.set(workspace.T1);
+    // constant-time Montgomery ladder /w Jacobian coords
+    private ECPointJacobian scalarMult(ECPointJacobian Pj, BigInteger k) {
+        ECPointJacobian R0 = ECPointJacobian.INF, R1 = Pj;
+        for (int i=k.bitLength()-1;i>=0;i--) {
+            if (k.testBit(i)) { R0 = R0.add(R1); R1 = R1.twice(); }
+            else { R1 = R0.add(R1); R0 = R0.twice(); }
         }
-        return workspace.R0;
+        return R0;
     }
 
+    // validate subgroup: [n]P == infinity
+    private boolean inSubgroup(ECPointAffine pt) {
+        // check [n]P == INF
+        return scalarMult(pt.toJacobian(), N).isInfinity();
+    }
+
+    // Curve equation check
     private boolean isOnCurve(ECPointAffine pt) {
         if (pt.infinity) return false;
-        BigInteger y2 = workspace.modArith.square(pt.y);
-        BigInteger x3 = workspace.modArith.multiply(pt.x, pt.x).multiply(pt.x).mod(P);
-        BigInteger ax = workspace.modArith.multiply(A, pt.x);
-        BigInteger rhs = workspace.modArith.add(workspace.modArith.add(x3, ax), B);
-        return y2.equals(rhs);
+        BigInteger lhs = pt.y.multiply(pt.y).mod(P);
+        BigInteger rhs = pt.x.multiply(pt.x).multiply(pt.x)
+                .add(A.multiply(pt.x)).add(B).mod(P);
+        return lhs.equals(rhs);
     }
 
-    // ================= HKDF-SHA256 (reuse buffers) =================
+    // ========== HKDF-SHA256 ===========
     private byte[] hkdfSha256(byte[] ikm, byte[] salt, byte[] info, int length) {
         try {
-            // --- Extract ---
-            HKDF_MAC.init((salt == null)
-                    ? saltKeySpec
-                    : new SecretKeySpec(salt, "HmacSHA256"));
-            // feed IKM
-            HKDF_MAC.update(ikm);
-            // get PRK
-            byte[] prk = HKDF_MAC.doFinal();
-            // copy into prkBytes buffer
-            System.arraycopy(prk, 0, prkBytes, 0, prkBytes.length);
+            // Extract
+            if (salt == null) salt = new byte[32];
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(salt, "HmacSHA256"));
+            byte[] prk = mac.doFinal(ikm);
 
-            // --- Expand ---
-            int pos = 0;
-            int counter = 1;
-            int tLen = 0;
-
-            while (pos < length) {
-                HKDF_MAC.init(prkKeySpec);
-                // previous block
-                if (tLen > 0) {
-                    HKDF_MAC.update(tBytes, 0, tLen);
-                }
-                // context info
-                if (info != null) {
-                    HKDF_MAC.update(info);
-                }
-                // counter octet
-                HKDF_MAC.update((byte) counter);
-                // compute next T
-                byte[] t = HKDF_MAC.doFinal();
-                tLen = t.length;
-                // copy into reusable tBytes buffer
-                System.arraycopy(t, 0, tBytes, 0, tLen);
-
-                // copy as much as needed into okmBytes
-                int toCopy = Math.min(tLen, length - pos);
-                System.arraycopy(tBytes, 0, okmBytes, pos, toCopy);
-                pos += toCopy;
-                counter++;
+            // Expand
+            int hashLen = 32;
+            int n = (int) Math.ceil((double) length / hashLen);
+            byte[] okm = new byte[length];
+            byte[] t = new byte[0];
+            int copied = 0;
+            for (int i = 1; i <= n; i++) {
+                mac.init(new SecretKeySpec(prk, "HmacSHA256"));
+                mac.update(t);
+                if (info != null) mac.update(info);
+                mac.update((byte) i);
+                t = mac.doFinal();
+                int toCopy = Math.min(hashLen, length - copied);
+                System.arraycopy(t, 0, okm, copied, toCopy);
+                copied += toCopy;
             }
-
-            return okmBytes;
+            return okm;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    // ===== Helper: fixed-length BE representation =====
-    private byte[] toBytes(BigInteger v, int numBytes) {
-        byte[] raw = v.toByteArray();
-        byte[] out = new byte[numBytes];
-        int start = (raw.length > numBytes && raw[0] == 0) ? 1 : 0;
-        int len = Math.min(raw.length - start, numBytes);
-        System.arraycopy(raw, start, out, numBytes - len, len);
-        return out;
-    }
-
-    // ===== Workspace & Points & ModArithmetic =====
-    private static class PointArithmeticWorkspace {
-        final ModArithmetic modArith;
-        final ECPointJacobian R0 = new ECPointJacobian();
-        final ECPointJacobian R1 = new ECPointJacobian();
-        final ECPointJacobian T0 = new ECPointJacobian();
-        final ECPointJacobian T1 = new ECPointJacobian();
-
-        PointArithmeticWorkspace(BigInteger modulus) {
-            modArith = new ModArithmetic(modulus);
-        }
-
-        void reset() {
-            R0.setInfinity();
-            R1.setInfinity();
-            T0.setInfinity();
-            T1.setInfinity();
-        }
-    }
-
-    private static class ECPointJacobian {
-        BigInteger X, Y, Z;
-        boolean infinity;
-
-        static final ECPointJacobian INF = new ECPointJacobian();
-
-        ECPointJacobian() {
-            setInfinity();
-        }
-
-        ECPointJacobian(BigInteger X, BigInteger Y, BigInteger Z) {
-            this.X = X;
-            this.Y = Y;
-            this.Z = Z;
-            this.infinity = false;
-        }
-
-        void setInfinity() {
-            this.X = BigInteger.ZERO;
-            this.Y = BigInteger.ZERO;
-            this.Z = BigInteger.ZERO;
-            this.infinity = true;
-        }
-
-        void set(ECPointJacobian p) {
-            this.X = p.X;
-            this.Y = p.Y;
-            this.Z = p.Z;
-            this.infinity = p.infinity;
-        }
-
-        boolean isInfinity() {
-            return infinity;
-        }
-
-        void twice(ECPointJacobian r, ModArithmetic mod) {
-            if (infinity) {
-                r.setInfinity();
-                return;
-            }
-            BigInteger XX   = mod.square(X);
-            BigInteger YY   = mod.square(Y);
-            BigInteger YYYY = mod.square(YY);
-            BigInteger S    = mod.multiply(BigInteger.valueOf(4), mod.multiply(X, YY));
-            BigInteger Z2   = mod.square(Z);
-            BigInteger Z4   = mod.square(Z2);
-            BigInteger M    = mod.add(mod.multiply(BigInteger.valueOf(3), XX),
-                    mod.multiply(A, Z4));
-
-            r.X = mod.subtract(mod.square(M), mod.multiply(BigInteger.valueOf(2), S));
-            r.Y = mod.subtract(
-                    mod.multiply(M, mod.subtract(S, r.X)),
-                    mod.multiply(BigInteger.valueOf(8), YYYY)
-            );
-            r.Z = mod.multiply(BigInteger.valueOf(2),
-                    mod.multiply(Y, Z));
-            r.infinity = false;
-        }
-
-        void add(ECPointJacobian Q, ECPointJacobian r, ModArithmetic mod) {
-            if (infinity) {
-                r.set(Q);
-                return;
-            }
-            if (Q.infinity) {
-                r.set(this);
-                return;
-            }
-
-            BigInteger Z1Z1 = mod.square(Z);
-            BigInteger Z2Z2 = mod.square(Q.Z);
-            BigInteger U1   = mod.multiply(X, Z2Z2);
-            BigInteger U2   = mod.multiply(Q.X, Z1Z1);
-            BigInteger S1   = mod.multiply(Y, mod.multiply(Q.Z, Z2Z2));
-            BigInteger S2   = mod.multiply(Q.Y, mod.multiply(Z, Z1Z1));
-
-            if (U1.equals(U2)) {
-                if (S1.equals(S2)) {
-                    twice(r, mod);
-                    return;
-                }
-                r.setInfinity();
-                return;
-            }
-
-            BigInteger H   = mod.subtract(U2, U1);
-            BigInteger R_  = mod.subtract(S2, S1);
-            BigInteger HH  = mod.square(H);
-            BigInteger HHH = mod.multiply(H, HH);
-            BigInteger V   = mod.multiply(U1, HH);
-
-            r.X = mod.subtract(mod.subtract(mod.square(R_), HHH),
-                    mod.multiply(BigInteger.valueOf(2), V));
-            r.Y = mod.subtract(
-                    mod.multiply(R_, mod.subtract(V, r.X)),
-                    mod.multiply(S1, HHH)
-            );
-            r.Z = mod.multiply(Z, mod.multiply(Q.Z, H));
-            r.infinity = false;
-        }
-
-        ECPointAffine toAffine() {
-            if (infinity) {
-                return ECPointAffine.INF;
-            }
-            BigInteger zInv  = Z.modInverse(P);
-            BigInteger zInv2 = zInv.multiply(zInv).mod(P);
-            BigInteger xA    = X.multiply(zInv2).mod(P);
-            BigInteger yA    = Y.multiply(zInv2).multiply(zInv).mod(P);
-            return new ECPointAffine(xA, yA);
-        }
-    }
-
-    private static class ModArithmetic {
-        private final BigInteger m;
-        ModArithmetic(BigInteger modulus) { this.m = modulus; }
-        BigInteger add(BigInteger a, BigInteger b)        { return a.add(b).mod(m); }
-        BigInteger subtract(BigInteger a, BigInteger b)   { return a.subtract(b).mod(m); }
-        BigInteger multiply(BigInteger a, BigInteger b)   { return a.multiply(b).mod(m); }
-        BigInteger square(BigInteger a)                   { return a.multiply(a).mod(m); }
-    }
-
+    // ======== COORDINATES =========
     public static class ECPointAffine {
-        public final BigInteger x, y;
-        public final boolean infinity;
-        public static final ECPointAffine INF = new ECPointAffine();
+        final BigInteger x,y; final boolean infinity;
+        public ECPointAffine(BigInteger x, BigInteger y){this.x=x;this.y=y;this.infinity=false;}
+        private ECPointAffine(){this.x=this.y=null;this.infinity=true;}
+        public static final ECPointAffine INF=new ECPointAffine();
+        ECPointJacobian toJacobian(){return infinity?ECPointJacobian.INF:new ECPointJacobian(x,y,BigInteger.ONE);}
+    }
 
-        private ECPointAffine() {
-            this.x = this.y = null;
-            this.infinity = true;
+    static class ECPointJacobian {
+        final BigInteger X,Y,Z; final boolean infinity;
+        ECPointJacobian(BigInteger X,BigInteger Y,BigInteger Z){this.X=X;this.Y=Y;this.Z=Z;this.infinity=false;}
+        private ECPointJacobian(){this.X=this.Y=this.Z=null;this.infinity=true;}
+        static final ECPointJacobian INF=new ECPointJacobian();
+        boolean isInfinity(){return infinity;}
+
+        ECPointJacobian twice(){
+            if(infinity) return this;
+            // SEC1 Thm 3.21: M = 3*X1^2 + a*Z1^4
+            BigInteger XX = X.multiply(X).mod(P);
+            BigInteger YY = Y.multiply(Y).mod(P);
+            BigInteger YYYY = YY.multiply(YY).mod(P);
+            BigInteger S = X.add(YY).multiply(X.add(YY)).subtract(XX).subtract(YYYY)
+                    .multiply(BigInteger.valueOf(2)).mod(P);
+            BigInteger Z2 = Z.multiply(Z).mod(P);
+            BigInteger Z4 = Z2.multiply(Z2).mod(P);
+            BigInteger M = XX.multiply(BigInteger.valueOf(3)).add(A.multiply(Z4)).mod(P);
+            BigInteger X3 = M.multiply(M).subtract(S).subtract(S).mod(P);
+            BigInteger Y3 = M.multiply(S.subtract(X3)).subtract(YYYY.multiply(BigInteger.valueOf(8))).mod(P);
+            BigInteger Z3 = Y.multiply(Z).multiply(BigInteger.valueOf(2)).mod(P);
+            return new ECPointJacobian(X3,Y3,Z3);
         }
-
-        public ECPointAffine(BigInteger x, BigInteger y) {
-            this.x = x;
-            this.y = y;
-            this.infinity = false;
+        ECPointJacobian add(ECPointJacobian Q){
+            if(this.infinity) return Q; if(Q.infinity) return this;
+            BigInteger Z1Z1=Z.multiply(Z).mod(P), Z2Z2=Q.Z.multiply(Q.Z).mod(P);
+            BigInteger U1=X.multiply(Z2Z2).mod(P), U2=Q.X.multiply(Z1Z1).mod(P);
+            BigInteger Z1Z1Z1=Z.multiply(Z1Z1).mod(P), Z2Z2Z2=Q.Z.multiply(Z2Z2).mod(P);
+            BigInteger S1=Y.multiply(Z2Z2Z2).mod(P), S2=Q.Y.multiply(Z1Z1Z1).mod(P);
+            if(U1.equals(U2)){
+                if(S1.equals(S2)) return twice();
+                return INF;
+            }
+            BigInteger H=U2.subtract(U1).mod(P), R=S2.subtract(S1).mod(P);
+            BigInteger HH=H.multiply(H).mod(P), HHH=H.multiply(HH).mod(P);
+            BigInteger U1HH=U1.multiply(HH).mod(P);
+            BigInteger X3=R.multiply(R).subtract(HHH).subtract(U1HH).subtract(U1HH).mod(P);
+            BigInteger Y3=R.multiply(U1HH.subtract(X3)).subtract(S1.multiply(HHH)).mod(P);
+            BigInteger Z3=Z.multiply(Q.Z).multiply(H).mod(P);
+            return new ECPointJacobian(X3,Y3,Z3);
         }
-
-        ECPointJacobian toJacobian() {
-            return infinity
-                    ? new ECPointJacobian()
-                    : new ECPointJacobian(x, y, BigInteger.ONE);
+        ECPointAffine toAffine(){
+            if(infinity) return ECPointAffine.INF;
+            BigInteger zInv=Z.modInverse(P);
+            BigInteger zInv2=zInv.multiply(zInv).mod(P);
+            BigInteger xA=X.multiply(zInv2).mod(P);
+            BigInteger yA=Y.multiply(zInv2).multiply(zInv).mod(P);
+            return new ECPointAffine(xA,yA);
         }
     }
 
 
-    public ECPointAffine getPublicPoint() {
-        return Q;
+    // ======== INNE UTIL ========
+    private byte[] toFixedLength(BigInteger v) {
+        byte[] b = v.toByteArray();
+        if (b.length == 33 && b[0] == 0) {
+            byte[] tmp = new byte[32];
+            System.arraycopy(b, 1, tmp, 0, 32);
+            return tmp;
+        } else if (b.length < 32) {
+            byte[] tmp = new byte[32];
+            System.arraycopy(b, 0, tmp, 32 - b.length, b.length);
+            return tmp;
+        }
+        return b;
     }
-    public String getPublicKey() {
-        return bytesToHex(getPublicKeyBytes());
-    }
-    private String bytesToHex(byte[]b){StringBuilder s=new StringBuilder();for(byte x:b)s.append(String.format("%02x",x));return s.toString();}
 
 
 }

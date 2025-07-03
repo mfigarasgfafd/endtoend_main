@@ -5,6 +5,7 @@ import java.security.*;
 import java.security.spec.ECGenParameterSpec;
 import java.util.Base64;
 
+// testing - unused, library implementation is located in maingui
 public class ECDiffieHellmanExample {
     private KeyPair keyPair;
     private byte[] sharedSecret;

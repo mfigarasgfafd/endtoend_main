@@ -2,7 +2,7 @@ package testing;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.example.ManualDiffieHellman;
-import org.example.ManualECDiffieHellman;
+import org.example.ManualECDiffieHellmanBenchmarking;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.profile.GCProfiler;
@@ -66,7 +66,7 @@ public class MemoryBenchmark {
 
         // --- Manual ECDH (160, 256, 384) ---
         for (int ks : new int[]{160, 256, 384}) {
-            ManualECDiffieHellman ecdh = new ManualECDiffieHellman();
+            ManualECDiffieHellmanBenchmarking ecdh = new ManualECDiffieHellmanBenchmarking();
             ecdh.setKeySize(ks);
             ecdh.generateKeyPair();
 
@@ -124,12 +124,12 @@ public class MemoryBenchmark {
     @State(Scope.Benchmark)
     public static class ManualECDHKeySizeState {
         @Param({"160", "256", "384"}) public int keySize;
-        ManualECDiffieHellman alice, bob;
+        ManualECDiffieHellmanBenchmarking alice, bob;
         @Setup(Level.Trial)
         public void setup() throws Exception {
-            alice = new ManualECDiffieHellman();
+            alice = new ManualECDiffieHellmanBenchmarking();
             alice.setKeySize(keySize); alice.generateKeyPair();
-            bob   = new ManualECDiffieHellman();
+            bob   = new ManualECDiffieHellmanBenchmarking();
             bob.setKeySize(keySize);   bob.generateKeyPair();
         }
     }
@@ -212,14 +212,13 @@ public class MemoryBenchmark {
 
     @Benchmark @BenchmarkMode(Mode.AverageTime) @OutputTimeUnit(TimeUnit.MILLISECONDS)
     public void manualEcdhExchange(ManualECDHKeySizeState s, Blackhole bh) throws Exception {
-        // same pattern for your ManualECDiffieHellman
         s.bob.computeSharedSecret(s.alice.getPublicPoint());
         bh.consume(s.bob.getSharedSecret());
     }
 
     @Benchmark @BenchmarkMode(Mode.AverageTime) @OutputTimeUnit(TimeUnit.MILLISECONDS)
     public void manualEcdhKeyGen(ECDHKeyGenSizeState s, Blackhole bh) throws Exception {
-        ManualECDiffieHellman ecdh = new ManualECDiffieHellman();
+        ManualECDiffieHellmanBenchmarking ecdh = new ManualECDiffieHellmanBenchmarking();
         ecdh.setKeySize(s.keySize); ecdh.generateKeyPair();
         bh.consume(ecdh);
     }

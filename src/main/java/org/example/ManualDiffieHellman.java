@@ -87,12 +87,6 @@ public class ManualDiffieHellman {
                 BigInteger.valueOf(2)));
 
 
-        // 7680-bit prime (generated via OpenSSL)
-//        BigInteger p7680 = new BigInteger(
-//                "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1" +
-//                        // ... truncated for brevity ...
-//                        "FFFFFFFFFFFFFFFF", 16);
-//        predefinedGroups.put(7680, new Group(p7680, BigInteger.valueOf(2)));
 
     }
 

@@ -24,7 +24,6 @@ public class SecurityConfig {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        // your “always matches” encoder
         return new PasswordEncoder() {
             @Override public String encode(CharSequence raw) { return raw.toString(); }
             @Override public boolean matches(CharSequence raw, String enc) { return true; }
@@ -45,15 +44,12 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 1) Disable CSRF so both your API clients and the H2 web console can submit forms
                 .csrf(csrf -> csrf.disable())
-
-                // 2) Allow H2 console to be loaded in a frame
                 .headers(headers -> headers
                         .frameOptions(frame -> frame.sameOrigin())
                 )
 
-                // 3) URL authorization rules
+                // URL authorization rules
                 .authorizeHttpRequests(auth -> auth
                         // Registration and user‐existence check
                         .requestMatchers(HttpMethod.GET,  "/api/users/exists/**").permitAll()
@@ -65,17 +61,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/users/*/public-key").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/users/*/public-key").permitAll()
 
-                        // H2 console
                         .requestMatchers("/h2-console/**").permitAll()
-
-                        // Everything else requires authentication
                         .anyRequest().authenticated()
                 )
 
-                // 4) Use HTTP Basic for your API …
                 .httpBasic(Customizer.withDefaults())
-
-                // 5) … but keep the default session management so the H2 console’s login will work
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
                 );

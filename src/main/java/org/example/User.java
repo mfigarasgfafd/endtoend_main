@@ -25,7 +25,7 @@ public class User {
     public void setPassword(String password) { this.password = password; }
 
     private LocalDateTime createdAt;
-    private LocalDateTime lastSeen;
+//    private LocalDateTime lastSeen;
 
     public String getUserIdString() {
         return userId != null ? userId.toString() : "";
@@ -62,11 +62,11 @@ public class User {
         this.createdAt = createdAt;
     }
 
-    public LocalDateTime getLastSeen() {
-        return lastSeen;
-    }
-
-    public void setLastSeen(LocalDateTime lastSeen) {
-        this.lastSeen = lastSeen;
-    }
+//    public LocalDateTime getLastSeen() {
+//        return lastSeen;
+//    }
+//
+//    public void setLastSeen(LocalDateTime lastSeen) {
+//        this.lastSeen = lastSeen;
+//    }
 }
