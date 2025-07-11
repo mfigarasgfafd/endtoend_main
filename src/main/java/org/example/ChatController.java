@@ -52,17 +52,14 @@ public class ChatController {
     @PostMapping("/messages")
     public ResponseEntity<Void> receiveMessage(@RequestBody MessageRequest request,
                                                @RequestHeader("Authorization") String authHeader) {
-        // weryfikacja użytkownika (verifyUser) jak poprzednio...
         User user = verifyUser(authHeader);
         if (!user.getUsername().equals(request.sender())) {
             return ResponseEntity.status(403).build();
         }
-        // Możesz dodatkowo sprawdzić poprawność pola type:
         String type = request.type();
         if (!"TEXT".equals(type) && !"CTRL".equals(type)) {
             return ResponseEntity.badRequest().build();
         }
-        // Zapisz wiadomość
         chatService.sendMessage(request.sender(),
                 request.recipient(),
                 request.type(),

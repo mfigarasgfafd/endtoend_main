@@ -52,18 +52,18 @@ public class SecureChatApplication {
 //        return user;
 //    }
 //
-    private KeyPair generateKeyPair(String algorithm) throws Exception {
-        KeyPairGenerator kpg;
-        switch (algorithm.toUpperCase()) {
-            case "ECDH":
-                kpg = KeyPairGenerator.getInstance("EC");
-                kpg.initialize(new ECGenParameterSpec("secp256r1"));
-                break;
-            case "DH":
-            default:
-                kpg = KeyPairGenerator.getInstance("DH");
-                kpg.initialize(2048);
-        }
-        return kpg.generateKeyPair();
-    }
+//    private KeyPair generateKeyPair(String algorithm) throws Exception {
+//        KeyPairGenerator kpg;
+//        switch (algorithm.toUpperCase()) {
+//            case "ECDH":
+//                kpg = KeyPairGenerator.getInstance("EC");
+//                kpg.initialize(new ECGenParameterSpec("secp256r1"));
+//                break;
+//            case "DH":
+//            default:
+//                kpg = KeyPairGenerator.getInstance("DH");
+//                kpg.initialize(2048);
+//        }
+//        return kpg.generateKeyPair();
+//    }
 }

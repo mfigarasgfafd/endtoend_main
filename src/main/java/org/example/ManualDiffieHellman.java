@@ -146,6 +146,9 @@ public class ManualDiffieHellman {
     }
 
     public void computeSharedSecret(BigInteger B) throws InvalidKeyException {
+        if (B == null) {
+            throw new InvalidKeyException("Public key is null");
+        }
         if (B.compareTo(BigInteger.TWO) < 0 ||
                 B.compareTo(group.P.subtract(BigInteger.TWO)) > 0 ||
                 !B.modPow(group.Q, group.P).equals(BigInteger.ONE)) {

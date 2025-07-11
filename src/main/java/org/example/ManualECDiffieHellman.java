@@ -19,7 +19,7 @@ public class ManualECDiffieHellman {
             new BigInteger("4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5", 16)
     );
 
-    private BigInteger d;
+    protected BigInteger d;
     private ECPointAffine Q;
     private byte[] shared;
     private final SecureRandom rnd = new SecureRandom();
@@ -127,7 +127,7 @@ public class ManualECDiffieHellman {
     public static class ECPointAffine {
         final BigInteger x,y; final boolean infinity;
         public ECPointAffine(BigInteger x, BigInteger y){this.x=x;this.y=y;this.infinity=false;}
-        private ECPointAffine(){this.x=this.y=null;this.infinity=true;}
+        public ECPointAffine(){this.x=this.y=null;this.infinity=true;}
         public static final ECPointAffine INF=new ECPointAffine();
         ECPointJacobian toJacobian(){return infinity?ECPointJacobian.INF:new ECPointJacobian(x,y,BigInteger.ONE);}
     }
