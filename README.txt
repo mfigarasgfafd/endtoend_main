@@ -1,3 +1,5 @@
+-Sugerowane Java JDK: 23.0.1
+
 -do projektu w intelij trzeba dodać JavaFX (testowane 23.02 & 24.01)
     -download & unzip javafx SDK
     intellij file --> project structure --> add javafx-sdk-{version}/lib
